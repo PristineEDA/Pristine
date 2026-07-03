@@ -31,6 +31,7 @@ type BrowserWindowInstance = {
 
 type TrayInstance = {
   icon: unknown;
+  setImage: Mock<(image: unknown) => void>;
   setToolTip: Mock<(tooltip: string) => void>;
   setContextMenu: Mock<(menu: unknown) => void>;
   popUpContextMenu: Mock<(menu?: unknown) => void>;
@@ -49,6 +50,24 @@ const mocks = vi.hoisted(() => {
     ['userData', `${mockAppDataPath}/Pristine`],
     ['sessionData', `${mockAppDataPath}/Pristine/session-data`],
   ]);
+
+  function createMockNativeImage(
+    kind: string,
+    options: { empty?: boolean; path?: string; sourceBuffer?: Buffer; sourceOptions?: Record<string, unknown> } = {},
+  ) {
+    const image = {
+      kind,
+      path: options.path,
+      sourceBuffer: options.sourceBuffer,
+      sourceOptions: options.sourceOptions,
+      getSize: vi.fn(() => ({ height: 32, width: 32 })),
+      isEmpty: vi.fn(() => options.empty === true),
+      resize: vi.fn(() => image),
+      toBitmap: vi.fn(() => Buffer.alloc(32 * 32 * 4)),
+    };
+
+    return image;
+  }
 
   class BrowserWindowMock {
     static getAllWindows = vi.fn(() => browserWindowInstances);
@@ -139,6 +158,7 @@ const mocks = vi.hoisted(() => {
   }
 
   class TrayMock {
+    setImage = vi.fn();
     setToolTip = vi.fn();
     setContextMenu = vi.fn();
     popUpContextMenu = vi.fn();
@@ -188,9 +208,12 @@ const mocks = vi.hoisted(() => {
     mockSetApplicationMenu: vi.fn(),
     mockWriteShortcutLink: vi.fn(() => true),
     mockExistsSync: vi.fn<(filePath: string) => boolean>(() => true),
-    mockCreateFromDataURL: vi.fn(() => ({ kind: 'native-image-data-url' })),
-    mockCreateFromPath: vi.fn((filePath: string) => ({ kind: 'native-image-path', path: filePath })),
-    mockCreateEmpty: vi.fn(() => ({ kind: 'native-image-empty' })),
+    mockCreateFromDataURL: vi.fn(() => createMockNativeImage('native-image-data-url')),
+    mockCreateFromPath: vi.fn((filePath: string) => createMockNativeImage('native-image-path', { path: filePath })),
+    mockCreateFromBuffer: vi.fn((sourceBuffer: Buffer, sourceOptions?: Record<string, unknown>) => (
+      createMockNativeImage('native-image-buffer', { sourceBuffer, sourceOptions })
+    )),
+    mockCreateEmpty: vi.fn(() => createMockNativeImage('native-image-empty', { empty: true })),
     mockDisposeLspSession: vi.fn(),
     mockDisposeAllTerminalSessions: vi.fn(),
     mockFlushPendingConfigSave: vi.fn(),
@@ -236,6 +259,7 @@ vi.mock('electron', () => ({
   },
   nativeImage: {
     createFromDataURL: mocks.mockCreateFromDataURL,
+    createFromBuffer: mocks.mockCreateFromBuffer,
     createFromPath: mocks.mockCreateFromPath,
     createEmpty: mocks.mockCreateEmpty,
   },
@@ -323,6 +347,7 @@ async function importMain(options?: {
   mocks.mockExistsSync.mockReset();
   mocks.mockExistsSync.mockImplementation(() => true);
   mocks.mockCreateFromDataURL.mockClear();
+  mocks.mockCreateFromBuffer.mockClear();
   mocks.mockCreateFromPath.mockClear();
   mocks.mockCreateEmpty.mockClear();
   mocks.mockDisposeLspSession.mockClear();
@@ -496,6 +521,10 @@ describe('electron main entry', () => {
 
     expect(getMainWindow?.()).toBe(mainWindow);
     expect(trayInstances[0].setToolTip).toHaveBeenCalledWith('Pristine');
+    expect(trayInstances[0].setImage).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'native-image-path',
+      path: expect.stringMatching(/logo-v1-32\.png$/),
+    }));
     expect(trayInstances[0].icon).toMatchObject({
       kind: 'native-image-path',
       path: expect.stringMatching(/logo-v1-32\.png$/),
@@ -562,6 +591,59 @@ describe('electron main entry', () => {
     mainWindow.emit('closed');
     expect(getMainWindow?.()).toBeNull();
     expect(mocks.mockDisposeAllTerminalSessions).not.toHaveBeenCalled();
+  });
+
+  it('updates tray icon and tooltip for unread notifications', async () => {
+    const { trayInstances } = await importMain({
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+    });
+
+    const tray = trayInstances[0];
+    const onNotificationHistoryChanged = mocks.mockRegisterAllHandlers.mock.calls[0]?.[8] as
+      | ((records: Array<{ id: string; readAt?: number }>) => void)
+      | undefined;
+
+    expect(onNotificationHistoryChanged).toEqual(expect.any(Function));
+
+    tray.setImage.mockClear();
+    tray.setToolTip.mockClear();
+    mocks.mockCreateFromDataURL.mockClear();
+    mocks.mockCreateFromBuffer.mockClear();
+    mocks.mockCreateFromPath.mockClear();
+
+    onNotificationHistoryChanged?.([
+      { id: 'notification-2' },
+      { id: 'notification-1' },
+    ]);
+
+    expect(mocks.mockCreateFromBuffer).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      { height: 32, scaleFactor: 1, width: 32 },
+    );
+    expect(tray.setImage).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'native-image-buffer',
+      sourceOptions: { height: 32, scaleFactor: 1, width: 32 },
+    }));
+    expect(tray.setToolTip).toHaveBeenLastCalledWith('Pristine\n2 unread notifications');
+
+    onNotificationHistoryChanged?.([
+      { id: 'notification-2', readAt: 200 },
+      { id: 'notification-1' },
+    ]);
+
+    expect(tray.setToolTip).toHaveBeenLastCalledWith('Pristine\n1 unread notification');
+
+    onNotificationHistoryChanged?.([
+      { id: 'notification-2', readAt: 200 },
+      { id: 'notification-1', readAt: 300 },
+    ]);
+
+    expect(tray.setImage).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'native-image-path',
+      path: expect.stringMatching(/logo-v1-32\.png$/),
+    }));
+    expect(tray.setToolTip).toHaveBeenLastCalledWith('Pristine');
   });
 
   it('uses the last project root from config when no project env override is present', async () => {

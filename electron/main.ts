@@ -20,8 +20,9 @@ import { stopPristineEdaEnvironment } from './ipc/wsl.js';
 import type { WindowCloseDecision, WindowCloseRequest } from '../src/app/window/windowClose.js';
 import type { FloatingInfoWindowMode } from '../src/app/window/floatingInfoWindow.js';
 import type { ProjectWindowState } from '../types/project.js';
+import type { NotificationRecord } from '../types/notification.js';
 import { handleAuthCallbackUrl, isAuthProtocolUrl } from './ipc/auth.js';
-import { createAppLogoNativeImage } from './appLogo.js';
+import { createAppLogoNativeImage, createAppLogoUnreadNativeImage } from './appLogo.js';
 import { ensureWindowsNotificationShortcut } from './windowsNotificationIdentity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,6 +60,7 @@ let pendingAuthCallbackUrl: string | null = null;
 let pendingProjectWindowState: ProjectWindowState | null = null;
 let resolveWorkspaceReady: (() => void) | null = null;
 let workspaceReadyPromise: Promise<void> = Promise.resolve();
+let trayUnreadNotificationCount = 0;
 
 app.setName(APP_DISPLAY_NAME);
 
@@ -598,14 +600,40 @@ function createTray(): Tray {
   const nextTray = new Tray(createAppLogoNativeImage(32));
   const trayMenu = createTrayMenu();
 
-  nextTray.setToolTip('Pristine');
   nextTray.setContextMenu(trayMenu);
   nextTray.on('click', () => {
     nextTray.popUpContextMenu(trayMenu);
   });
 
   tray = nextTray;
+  updateTrayNotificationPresentation();
   return nextTray;
+}
+
+function getTrayTooltip(unreadCount: number): string {
+  if (unreadCount <= 0) {
+    return 'Pristine';
+  }
+
+  return `Pristine\n${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`;
+}
+
+function updateTrayNotificationPresentation(): void {
+  if (!tray) {
+    return;
+  }
+
+  tray.setImage(
+    trayUnreadNotificationCount > 0
+      ? createAppLogoUnreadNativeImage(32)
+      : createAppLogoNativeImage(32),
+  );
+  tray.setToolTip(getTrayTooltip(trayUnreadNotificationCount));
+}
+
+function updateTrayNotifications(records: NotificationRecord[]): void {
+  trayUnreadNotificationCount = records.filter((record) => record.readAt === undefined).length;
+  updateTrayNotificationPresentation();
 }
 
 function createSplashWindow(): BrowserWindow {
@@ -784,6 +812,7 @@ if (!singleInstanceLock) {
     getProjectWindowState,
     applyProjectWindowState,
     markWorkspaceReady,
+    updateTrayNotifications,
   );
 
   app.whenReady().then(() => {

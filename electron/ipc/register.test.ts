@@ -136,6 +136,7 @@ describe('register helpers', () => {
     const getProjectWindowState = vi.fn(() => null);
     const applyProjectWindowState = vi.fn();
     const markWorkspaceReady = vi.fn();
+    const onNotificationHistoryChanged = vi.fn();
 
     registerAllHandlers(
       getMainWindow,
@@ -146,6 +147,7 @@ describe('register helpers', () => {
       getProjectWindowState,
       applyProjectWindowState,
       markWorkspaceReady,
+      onNotificationHistoryChanged,
     );
 
     expect(mockRegisterPlatformHandler).toHaveBeenCalledTimes(1);
@@ -167,7 +169,7 @@ describe('register helpers', () => {
     expect(mockRegisterConfigHandlers).toHaveBeenCalledTimes(1);
     expect(mockRegisterAuthHandlers).toHaveBeenCalledTimes(1);
     expect(mockRegisterNoticeHandlers).toHaveBeenCalledTimes(1);
-    expect(mockRegisterNotificationHandlers).toHaveBeenCalledWith(getMainWindow);
+    expect(mockRegisterNotificationHandlers).toHaveBeenCalledWith(getMainWindow, onNotificationHistoryChanged);
     expect(mockRegisterProjectHandlers).toHaveBeenCalledWith(
       getMainWindow,
       expect.any(Function),

@@ -11,10 +11,11 @@ describe('useNotificationStore', () => {
   it('hydrates notification history in newest-first order', () => {
     useNotificationStore.getState().hydrate([
       { id: 'older', level: 'info', title: 'Older', body: '', createdAt: 10, expiresAt: 20, variant: 'standard' },
-      { id: 'newer', level: 'warning', title: 'Newer', body: '', createdAt: 30, expiresAt: 40, variant: 'standard' },
+      { id: 'newer', level: 'warning', title: 'Newer', body: '', createdAt: 30, expiresAt: 40, readAt: 35, variant: 'standard' },
     ]);
 
     expect(useNotificationStore.getState().history.map((record) => record.id)).toEqual(['newer', 'older']);
+    expect(useNotificationStore.getState().history[0]?.readAt).toBe(35);
   });
 
   it('publishes through electron API and inserts the record into history', async () => {
@@ -25,6 +26,7 @@ describe('useNotificationStore', () => {
       body: 'Failed',
       createdAt: 100,
       expiresAt: 5100,
+      readAt: 200,
       variant: 'standard',
     });
 
@@ -37,6 +39,7 @@ describe('useNotificationStore', () => {
     });
     expect(useNotificationStore.getState().history).toHaveLength(1);
     expect(useNotificationStore.getState().history[0]?.id).toBe('notification-1');
+    expect(useNotificationStore.getState().history[0]?.readAt).toBe(200);
   });
 
   it('dismisses through electron API and removes the record locally', async () => {
