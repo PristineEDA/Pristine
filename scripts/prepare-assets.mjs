@@ -13,6 +13,9 @@ const generatedDir = path.join(workspaceRoot, 'public', 'generated')
 const wallpaperTargetPath = path.join(generatedDir, 'empty-wallpaper.png')
 const generatedFontsDir = path.join(generatedDir, 'fonts')
 const generatedLogoDir = path.join(generatedDir, 'logo')
+const generatedSplashDir = path.join(generatedDir, 'splash')
+const splashBackgroundFileName = 'greek-lighthouse-masked-santorini-hillside-village-strict.png'
+const splashBackgroundTargetPath = path.join(generatedSplashDir, 'splash-background.png')
 const buildResourcesDir = path.join(workspaceRoot, 'build')
 
 const defaultAssetUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/empty-wallpaper.png'
@@ -21,11 +24,20 @@ const defaultFontAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/p
 const fontAssetBaseUrl = process.env.PRISTINE_FONT_ASSET_BASE_URL ?? defaultFontAssetBaseUrl
 const defaultLogoAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-letter-v3'
 const logoAssetBaseUrl = process.env.PRISTINE_LOGO_ASSET_BASE_URL ?? defaultLogoAssetBaseUrl
+const defaultSplashAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/splash/official'
+const splashAssetBaseUrl = process.env.PRISTINE_SPLASH_ASSET_BASE_URL ?? defaultSplashAssetBaseUrl
 const defaultLocalResourceRoot = path.resolve(workspaceRoot, '..', 'pristine-res')
 const localResourceRoot = process.env.PRISTINE_RES_LOCAL_DIR ?? defaultLocalResourceRoot
 const localWallpaperSourcePath = path.join(localResourceRoot, 'images', 'empty-wallpaper.png')
 const localFontSourceDir = path.join(localResourceRoot, 'fonts')
 const localLogoSourceDir = path.join(localResourceRoot, 'images', 'logo', 'logo-letter-v3')
+const localSplashBackgroundSourcePath = path.join(
+  localResourceRoot,
+  'images',
+  'splash',
+  'official',
+  splashBackgroundFileName,
+)
 
 const logoPngFiles = [
   'logo.png',
@@ -179,6 +191,14 @@ async function downloadRemoteFile(url, targetPath, label) {
 
 async function downloadRemoteAsset() {
   await downloadRemoteFile(assetUrl, wallpaperTargetPath, 'empty wallpaper')
+}
+
+async function downloadRemoteSplashBackground() {
+  await downloadRemoteFile(
+    joinRemoteUrl(splashAssetBaseUrl, splashBackgroundFileName),
+    splashBackgroundTargetPath,
+    'splash background',
+  )
 }
 
 async function copyLocalAsset(sourcePath, targetPath, label) {
@@ -401,11 +421,7 @@ async function prepareFontAssets() {
   }
 }
 
-async function main() {
-  await ensureDirectory(generatedDir)
-  await prepareFontAssets()
-  await prepareLogoAssets()
-
+async function prepareEmptyWallpaper() {
   if (await hasContent(wallpaperTargetPath)) {
     console.log(`Empty wallpaper already available: ${path.relative(workspaceRoot, wallpaperTargetPath)}`)
     return
@@ -417,6 +433,28 @@ async function main() {
   }
 
   await downloadRemoteAsset()
+}
+
+async function prepareSplashBackground() {
+  if (await hasContent(localSplashBackgroundSourcePath)) {
+    await copyLocalAsset(localSplashBackgroundSourcePath, splashBackgroundTargetPath, 'splash background')
+    return
+  }
+
+  if (await hasContent(splashBackgroundTargetPath)) {
+    console.log(`Splash background already available: ${path.relative(workspaceRoot, splashBackgroundTargetPath)}`)
+    return
+  }
+
+  await downloadRemoteSplashBackground()
+}
+
+async function main() {
+  await ensureDirectory(generatedDir)
+  await prepareFontAssets()
+  await prepareLogoAssets()
+  await prepareEmptyWallpaper()
+  await prepareSplashBackground()
 }
 
 main().catch((error) => {

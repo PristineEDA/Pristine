@@ -8,7 +8,10 @@
       :root {
         color-scheme: dark;
         --splash-background: #191a1b;
-        --splash-foreground: rgba(255, 255, 255, 0.88);
+        --splash-foreground: rgba(255, 255, 255, 0.92);
+        --splash-muted: rgba(255, 255, 255, 0.66);
+        --splash-progress-track: rgba(255, 255, 255, 0.22);
+        --splash-progress-fill: #2acb7d;
         background: var(--splash-background);
       }
 
@@ -26,8 +29,6 @@
       }
 
       body {
-        display: grid;
-        place-items: center;
         font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       }
 
@@ -35,9 +36,14 @@
         position: relative;
         width: 100%;
         height: 100%;
+        overflow: hidden;
+        color: var(--splash-foreground);
+        background: var(--splash-background);
       }
 
-      .image {
+      .background-image {
+        position: absolute;
+        inset: 0;
         display: block;
         width: 100%;
         height: 100%;
@@ -46,14 +52,88 @@
         -webkit-user-drag: none;
       }
 
-      .label {
+      .scrim {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(180deg, rgba(4, 8, 14, 0.46), rgba(4, 8, 14, 0.24) 42%, rgba(4, 8, 14, 0.62)),
+          linear-gradient(90deg, rgba(4, 8, 14, 0.52), rgba(4, 8, 14, 0.08) 54%, rgba(4, 8, 14, 0.34));
+      }
+
+      .brand {
         position: absolute;
         left: 28px;
-        bottom: 22px;
+        top: 24px;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 32px;
+        padding: 6px 10px 6px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 12px;
+        background: rgba(10, 14, 22, 0.34);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(14px);
+      }
+
+      .brand-logo {
+        display: block;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        object-fit: contain;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+
+      .brand-title {
+        font-size: 16px;
+        font-weight: 650;
+        line-height: 20px;
+        letter-spacing: 0;
         color: var(--splash-foreground);
-        font-size: 13px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+      }
+
+      .progress-shell {
+        position: absolute;
+        left: 32px;
+        right: 32px;
+        bottom: 28px;
+        display: grid;
+        gap: 9px;
+      }
+
+      .progress-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        color: var(--splash-muted);
+        font-size: 12px;
+        line-height: 16px;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.32);
+      }
+
+      .progress-track {
+        position: relative;
+        height: 5px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--splash-progress-track);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+      }
+
+      .progress-bar {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, rgba(42, 203, 125, 0.78), var(--splash-progress-fill));
+        box-shadow: 0 0 18px rgba(42, 203, 125, 0.36);
+        transform: scaleX(0.08);
+        transform-origin: left center;
+        transition: transform 240ms ease-out;
       }
     </style>
     <script>
@@ -66,7 +146,7 @@
           document.documentElement.style.colorScheme = themeKind;
           document.documentElement.style.setProperty(
             '--splash-foreground',
-            themeKind === 'light' ? 'rgba(15, 23, 42, 0.86)' : 'rgba(255, 255, 255, 0.88)',
+            themeKind === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(255, 255, 255, 0.92)',
           );
         }
 
@@ -74,13 +154,79 @@
           document.documentElement.style.setProperty('--splash-background', backgroundColor);
           document.documentElement.style.background = backgroundColor;
         }
+
+        window.addEventListener('DOMContentLoaded', () => {
+          const progress = document.querySelector('[data-testid="splash-progress"]');
+          const progressBar = document.querySelector('[data-testid="splash-progress-bar"]');
+          const progressValue = document.querySelector('[data-testid="splash-progress-value"]');
+          let value = 8;
+          let lastTimestamp = performance.now();
+
+          const updateProgress = (timestamp) => {
+            const delta = Math.max(0, timestamp - lastTimestamp);
+            lastTimestamp = timestamp;
+            const remaining = 92 - value;
+            value = Math.min(92, value + Math.max(0.08, remaining * 0.012) * (delta / 16.67));
+            const roundedValue = Math.round(value);
+
+            if (progress) {
+              progress.setAttribute('aria-valuenow', String(roundedValue));
+            }
+
+            if (progressBar) {
+              progressBar.style.transform = `scaleX(${value / 100})`;
+            }
+
+            if (progressValue) {
+              progressValue.textContent = `${roundedValue}%`;
+            }
+
+            requestAnimationFrame(updateProgress);
+          };
+
+          requestAnimationFrame(updateProgress);
+        });
       })();
     </script>
   </head>
   <body>
     <main class="frame" data-testid="splash-screen" aria-label="Pristine splash screen">
-      <!-- <img class="image" src="./splash.png" alt="Pristine splash image" /> -->
-      <div class="label">Pristine IDE</div>
+      <img
+        alt=""
+        aria-hidden="true"
+        class="background-image"
+        data-testid="splash-background-image"
+        draggable="false"
+        src="./generated/splash/splash-background.png"
+      />
+      <div class="scrim" aria-hidden="true"></div>
+      <section class="brand" aria-label="Pristine">
+        <img
+          alt="Pristine"
+          class="brand-logo"
+          data-testid="splash-brand-logo"
+          draggable="false"
+          src="./generated/logo/logo-32.png"
+        />
+        <div class="brand-title" data-testid="splash-brand-title">Pristine</div>
+      </section>
+      <section
+        aria-label="Loading Pristine"
+        aria-valuemax="100"
+        aria-valuemin="0"
+        aria-valuenow="8"
+        class="progress-shell"
+        data-testid="splash-progress"
+        role="progressbar"
+      >
+        <div class="progress-meta">
+          <span>Restoring workspace</span>
+          <span data-testid="splash-progress-value">8%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" data-testid="splash-progress-bar"></div>
+        </div>
+      </section>
     </main>
   </body>
-  </html>
+</html>

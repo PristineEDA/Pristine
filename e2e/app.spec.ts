@@ -605,6 +605,41 @@ async function waitForStartupWindow(
   return startupWindow;
 }
 
+async function expectSplashVisuals(page: Page) {
+  const backgroundImage = page.getByTestId('splash-background-image');
+  const brandLogo = page.getByTestId('splash-brand-logo');
+  const brandTitle = page.getByTestId('splash-brand-title');
+  const progress = page.getByTestId('splash-progress');
+  const progressBar = page.getByTestId('splash-progress-bar');
+
+  await expect(backgroundImage).toBeVisible();
+  await expect(brandLogo).toBeVisible();
+  await expect(brandTitle).toHaveText('Pristine');
+  await expect(progress).toBeVisible();
+  await expect(progressBar).toBeVisible();
+
+  await expect.poll(
+    async () => backgroundImage.evaluate((element) => {
+      const image = element as { complete?: boolean; naturalWidth?: number };
+      return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+    }),
+    { timeout: UI_READY_TIMEOUT_MS },
+  ).toBe(true);
+  await expect.poll(
+    async () => brandLogo.evaluate((element) => {
+      const image = element as { complete?: boolean; naturalWidth?: number };
+      return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+    }),
+    { timeout: UI_READY_TIMEOUT_MS },
+  ).toBe(true);
+
+  const initialProgressValue = Number(await progress.getAttribute('aria-valuenow') ?? '0');
+  await expect.poll(
+    async () => Number(await progress.getAttribute('aria-valuenow') ?? '0'),
+    { timeout: 3000 },
+  ).toBeGreaterThan(initialProgressValue);
+}
+
 async function getWindowByTitle(app: Awaited<ReturnType<typeof electron.launch>>, title: string) {
   const titledWindows = await getIdentifiedWindows(app);
 
@@ -2169,9 +2204,11 @@ test('splash window hands off to the main window after the startup delay', async
   const launchStartedAt = Date.now();
   const splashMidpointCheckMs = 2000;
   const { app, windowPromise } = await launchAppForSplashHandoff();
+  const splashWindow = await waitForStartupWindow(app, 'splash');
 
   await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash')).toBe(true);
   await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(false);
+  await expectSplashVisuals(splashWindow);
 
   const elapsedBeforeMidpointCheck = Date.now() - launchStartedAt;
   if (elapsedBeforeMidpointCheck < splashMidpointCheckMs) {
@@ -2238,10 +2275,12 @@ test('restored maximized project keeps the splash visible until the startup dela
   const launchStartedAt = Date.now();
   const splashMidpointCheckMs = 2000;
   const { app, windowPromise } = await launchAppForSplashHandoff({ projectRoot: null });
+  const splashWindow = await waitForStartupWindow(app, 'splash');
 
   try {
     await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash')).toBe(true);
     await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(false);
+    await expectSplashVisuals(splashWindow);
 
     const elapsedBeforeMidpointCheck = Date.now() - launchStartedAt;
     if (elapsedBeforeMidpointCheck < splashMidpointCheckMs) {
@@ -2272,7 +2311,25 @@ test('packaged Windows app keeps the splash handoff working during startup', asy
   test.skip(process.platform !== 'win32', 'Packaged splash E2E runs on Windows only');
   test.skip(!packagedWindowsExecutablePath, 'Run pnpm run package:win before executing packaged splash E2E');
 
-  const { app, window } = await launchPackagedWindowsApp();
+  if (!packagedWindowsExecutablePath) {
+    throw new Error('Packaged Windows executable not found');
+  }
+
+  const userDataPath = getE2EUserDataPath();
+  prepareE2EUserDataPath(userDataPath);
+
+  const app = await electron.launch({
+    executablePath: packagedWindowsExecutablePath,
+    env: {
+      ...process.env,
+      PRISTINE_E2E: '1',
+      PRISTINE_PROJECT_ROOT: fixtureWorkspace,
+      PRISTINE_USER_DATA_PATH: userDataPath,
+    },
+  });
+  const splashWindow = await waitForStartupWindow(app, 'splash');
+  await expectSplashVisuals(splashWindow);
+  const window = await waitForStartupWindow(app, 'main');
   const mainBrowserWindow = await app.browserWindow(window);
 
   await expect.poll(() => app.windows().length, { timeout: 15000 }).toBe(1);
