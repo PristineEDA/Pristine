@@ -2123,8 +2123,18 @@ test('app launches and shows main UI', async () => {
   await waitForStartupWorkspaceReady(window, projectRoot);
   await ensureExplorerVisible(window);
 
+  const menuLogo = window.getByTestId('menu-app-logo-image');
   const mainContentStack = window.getByTestId('main-content-stack');
   const explorerPanel = window.getByTestId('panel-left-panel');
+  await expect(menuLogo).toBeVisible();
+  await expect(menuLogo).toHaveAttribute('src', /(?:\.\/)?generated\/logo\/logo-32\.png$/);
+  await expect.poll(
+    async () => menuLogo.evaluate((element) => {
+      const image = element as { complete?: boolean; naturalWidth?: number };
+      return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+    }),
+    { timeout: UI_READY_TIMEOUT_MS },
+  ).toBe(true);
   await expect(explorerPanel).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   await expect(window.getByTestId('code-view-explorer')).toHaveAttribute('data-code-viewer-layout-mode', 'minimal');
   await expect(window.getByTestId('left-panel-header')).toHaveAttribute('data-code-viewer-layout-mode', 'minimal');

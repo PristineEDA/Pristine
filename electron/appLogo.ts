@@ -6,10 +6,10 @@ import { nativeImage } from 'electron';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const APP_LOGO_RELATIVE_PATHS = [
-  path.join(__dirname, '../dist/generated/logo/logo-v1-256.png'),
-  path.join(__dirname, '../public/generated/logo/logo-v1-256.png'),
+  path.join(__dirname, '../dist/generated/logo/logo-256.png'),
+  path.join(__dirname, '../public/generated/logo/logo-256.png'),
   path.join(__dirname, '../build/icon.png'),
-  path.join(__dirname, '../public/generated/logo/logo-v1.png'),
+  path.join(__dirname, '../public/generated/logo/logo.png'),
 ];
 
 function findFirstExistingPath(paths: readonly string[]): string | null {
@@ -18,8 +18,8 @@ function findFirstExistingPath(paths: readonly string[]): string | null {
 
 export function getAppLogoPath(size = 256): string | null {
   const candidates = [
-    path.join(__dirname, `../dist/generated/logo/logo-v1-${size}.png`),
-    path.join(__dirname, `../public/generated/logo/logo-v1-${size}.png`),
+    path.join(__dirname, `../dist/generated/logo/logo-${size}.png`),
+    path.join(__dirname, `../public/generated/logo/logo-${size}.png`),
     ...APP_LOGO_RELATIVE_PATHS,
   ];
 

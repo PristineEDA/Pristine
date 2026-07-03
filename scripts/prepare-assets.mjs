@@ -19,33 +19,33 @@ const defaultAssetUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-
 const assetUrl = process.env.PRISTINE_EMPTY_WALLPAPER_URL ?? defaultAssetUrl
 const defaultFontAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/fonts'
 const fontAssetBaseUrl = process.env.PRISTINE_FONT_ASSET_BASE_URL ?? defaultFontAssetBaseUrl
-const defaultLogoAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo'
+const defaultLogoAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-letter-v3'
 const logoAssetBaseUrl = process.env.PRISTINE_LOGO_ASSET_BASE_URL ?? defaultLogoAssetBaseUrl
 const defaultLocalResourceRoot = path.resolve(workspaceRoot, '..', 'pristine-res')
 const localResourceRoot = process.env.PRISTINE_RES_LOCAL_DIR ?? defaultLocalResourceRoot
 const localWallpaperSourcePath = path.join(localResourceRoot, 'images', 'empty-wallpaper.png')
 const localFontSourceDir = path.join(localResourceRoot, 'fonts')
-const localLogoSourceDir = path.join(localResourceRoot, 'images', 'logo')
+const localLogoSourceDir = path.join(localResourceRoot, 'images', 'logo', 'logo-letter-v3')
 
 const logoPngFiles = [
-  'logo-v1.png',
-  'logo-v1-16.png',
-  'logo-v1-32.png',
-  'logo-v1-64.png',
-  'logo-v1-128.png',
-  'logo-v1-256.png',
-  'logo-v1-512.png',
+  'logo.png',
+  'logo-16.png',
+  'logo-32.png',
+  'logo-64.png',
+  'logo-128.png',
+  'logo-256.png',
+  'logo-512.png',
 ]
-const logoIcoFile = 'logo-v1.ico'
-const logoIcnsFile = 'logo-v1.icns'
+const logoIcoFile = 'logo.ico'
+const logoIcnsFile = 'logo.icns'
 
 const logoIcnsChunks = [
-  ['icp4', 'logo-v1-16.png'],
-  ['icp5', 'logo-v1-32.png'],
-  ['icp6', 'logo-v1-64.png'],
-  ['ic07', 'logo-v1-128.png'],
-  ['ic08', 'logo-v1-256.png'],
-  ['ic09', 'logo-v1-512.png'],
+  ['icp4', 'logo-16.png'],
+  ['icp5', 'logo-32.png'],
+  ['icp6', 'logo-64.png'],
+  ['ic07', 'logo-128.png'],
+  ['ic08', 'logo-256.png'],
+  ['ic09', 'logo-512.png'],
 ]
 
 const fontAssets = [
@@ -239,10 +239,10 @@ async function prepareLogoAssets() {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'pristine-logo-assets-'))
 
   try {
-    const logoSourcePath = await resolveLogoAssetSource('logo-v1.png', tempRoot)
+    const logoSourcePath = await resolveLogoAssetSource('logo.png', tempRoot)
     if (!logoSourcePath) {
       throw new Error(
-        `Missing Pristine logo source: ${path.relative(workspaceRoot, path.join(localLogoSourceDir, 'logo-v1.png'))}`,
+        `Missing Pristine logo source: ${path.relative(workspaceRoot, path.join(localLogoSourceDir, 'logo.png'))}`,
       )
     }
 
@@ -251,13 +251,13 @@ async function prepareLogoAssets() {
       await copyLocalAsset(sourcePath, path.join(generatedLogoDir, fileName), `logo asset ${fileName}`)
     }
 
-    const packagePngSourcePath = await resolveLogoAssetSource('logo-v1-512.png', tempRoot) ?? logoSourcePath
+    const packagePngSourcePath = await resolveLogoAssetSource('logo-512.png', tempRoot) ?? logoSourcePath
     await copyLocalAsset(packagePngSourcePath, path.join(buildResourcesDir, 'icon.png'), 'packaged PNG icon')
 
     const icoSourcePath = await resolveLogoAssetSource(logoIcoFile, tempRoot)
     if (!icoSourcePath) {
       throw new Error(
-        `Missing Windows app icon: ${path.relative(workspaceRoot, path.join(localLogoSourceDir, logoIcoFile))}. Generate it from logo-v1.png in pristine-res before packaging.`,
+        `Missing Windows app icon: ${path.relative(workspaceRoot, path.join(localLogoSourceDir, logoIcoFile))}. Generate it from logo.png in pristine-res before packaging.`,
       )
     }
 

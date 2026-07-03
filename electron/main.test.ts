@@ -523,14 +523,14 @@ describe('electron main entry', () => {
     expect(trayInstances[0].setToolTip).toHaveBeenCalledWith('Pristine');
     expect(trayInstances[0].setImage).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'native-image-path',
-      path: expect.stringMatching(/logo-v1-32\.png$/),
+      path: expect.stringMatching(/logo-32\.png$/),
     }));
     expect(trayInstances[0].icon).toMatchObject({
       kind: 'native-image-path',
-      path: expect.stringMatching(/logo-v1-32\.png$/),
+      path: expect.stringMatching(/logo-32\.png$/),
     });
-    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-v1-32\.png$/));
-    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-v1-256\.png$/));
+    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-32\.png$/));
+    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-256\.png$/));
     expect(mocks.mockCreateEmpty).not.toHaveBeenCalled();
     expect(mocks.mockBuildFromTemplate).toHaveBeenCalledWith([
       expect.objectContaining({ label: 'Open Pristine' }),
@@ -641,7 +641,7 @@ describe('electron main entry', () => {
 
     expect(tray.setImage).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: 'native-image-path',
-      path: expect.stringMatching(/logo-v1-32\.png$/),
+      path: expect.stringMatching(/logo-32\.png$/),
     }));
     expect(tray.setToolTip).toHaveBeenLastCalledWith('Pristine');
   });

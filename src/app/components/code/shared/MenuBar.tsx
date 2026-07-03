@@ -395,9 +395,13 @@ export function MenuBar({
           {/* App icon / title */}
           {showWindowMenu && (
             <div className="flex items-center gap-1.5 px-3 pr-2" data-testid="menu-app-icon" style={noDrag as React.CSSProperties}>
-              <div className="w-4 h-4 rounded-sm bg-ide-accent flex items-center justify-center">
-                <span className="text-primary-foreground text-[9px] font-bold">P</span>
-              </div>
+              <img
+                alt="Pristine"
+                className="h-4 w-4 shrink-0 rounded-sm object-contain"
+                data-testid="menu-app-logo-image"
+                draggable={false}
+                src="./generated/logo/logo-32.png"
+              />
             </div>
           )}
 

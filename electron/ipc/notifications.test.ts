@@ -33,7 +33,7 @@ const {
   mockNotificationClose: vi.fn(),
   mockNotificationInstances: [] as MockNotificationInstance[],
   mockCreateAppLogoNativeImage: vi.fn<(size?: number) => { kind: string }>(() => ({ kind: 'app-logo-native-image' })),
-  mockGetAppLogoPath: vi.fn<(size?: number) => string | null>(() => 'C:\\Pristine\\logo-v1-64.png'),
+  mockGetAppLogoPath: vi.fn<(size?: number) => string | null>(() => 'C:\\Pristine\\logo-64.png'),
 }));
 
 class NotificationMock {
@@ -111,7 +111,7 @@ describe('notification IPC handlers', () => {
     mockNotificationInstances.length = 0;
     mockGetAllWindows.mockReturnValue([]);
     NotificationMock.isSupported.mockReturnValue(true);
-    mockGetAppLogoPath.mockReturnValue('C:\\Pristine\\logo-v1-64.png');
+    mockGetAppLogoPath.mockReturnValue('C:\\Pristine\\logo-64.png');
     delete process.env['PRISTINE_E2E'];
   });
 
@@ -262,7 +262,7 @@ describe('notification IPC handlers', () => {
       expect(toastXml).toContain('You missed messages in OpenPencil from Discord');
       expect(toastXml).toContain('Mark as Read');
       expect(toastXml).toContain('Delete');
-      expect(toastXml).toContain('file:///C:/Pristine/logo-v1-64.png');
+      expect(toastXml).toContain('file:///C:/Pristine/logo-64.png');
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
     }
