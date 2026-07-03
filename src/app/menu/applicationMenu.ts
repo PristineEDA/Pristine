@@ -7,6 +7,7 @@ export type AppMenuAction =
   | 'open-settings'
   | 'open-about'
   | 'open-notice-files'
+  | 'run-notification-progress-demo'
   | 'save-file'
   | 'save-all-files'
   | 'undo-editor'
@@ -46,6 +47,8 @@ export const applicationMenus: AppMenuSection[] = [
       { kind: 'item', name: 'Save', shortcut: 'Mod+S', action: 'save-file' },
       { kind: 'item', name: 'Save All', action: 'save-all-files' },
       { kind: 'item', name: 'Save As...', shortcut: 'Shift+Mod+S' },
+      { kind: 'separator' },
+      { kind: 'item', name: 'notif', action: 'run-notification-progress-demo' },
       { kind: 'separator' },
       { kind: 'item', name: 'Setting...', action: 'open-settings' },
       { kind: 'item', name: 'Close', shortcut: 'Mod+Q', action: 'close-app' },

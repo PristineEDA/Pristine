@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { execFile } from 'node:child_process';
-import { watch, type FSWatcher } from 'node:fs';
+import { watch, type Dirent, type FSWatcher } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AsyncChannels, StreamChannels } from './channels.js';
@@ -151,6 +151,16 @@ function parseGitStatus(stdout: string): Pick<WorkspaceGitStatusPayload, 'branch
   };
 }
 
+function prefixGitPathStates(
+  prefix: string,
+  pathStates: WorkspaceGitStatusPayload['pathStates'],
+): WorkspaceGitStatusPayload['pathStates'] {
+  return Object.entries(pathStates).reduce<WorkspaceGitStatusPayload['pathStates']>((current, [gitPath, state]) => {
+    current[normalizeGitPath(`${prefix}/${gitPath}`)] = state;
+    return current;
+  }, {});
+}
+
 function execGitStatus(root: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -213,6 +223,57 @@ async function hasProjectFiles(root: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function isGitRepositoryRoot(root: string): Promise<boolean> {
+  try {
+    const gitMetadataStat = await fs.stat(path.join(root, '.git'));
+    return gitMetadataStat.isDirectory() || gitMetadataStat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function readFirstLevelGitRepositories(root: string): Promise<Array<{ name: string; root: string }>> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const repositories: Array<{ name: string; root: string }> = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === '.git') {
+      continue;
+    }
+
+    const childRoot = path.join(root, entry.name);
+    if (await isGitRepositoryRoot(childRoot)) {
+      repositories.push({
+        name: normalizeGitPath(entry.name),
+        root: childRoot,
+      });
+    }
+  }
+
+  return repositories;
+}
+
+async function loadNestedGitPathStates(root: string): Promise<WorkspaceGitStatusPayload['pathStates']> {
+  const pathStates: WorkspaceGitStatusPayload['pathStates'] = {};
+  const repositories = await readFirstLevelGitRepositories(root);
+
+  for (const repository of repositories) {
+    try {
+      const stdout = await execGitStatus(repository.root);
+      Object.assign(pathStates, prefixGitPathStates(repository.name, parseGitStatus(stdout).pathStates));
+    } catch {
+      // Ignore broken or unavailable nested repositories; the root snapshot should still be usable.
+    }
+  }
+
+  return pathStates;
 }
 
 function clearQueuedWorkspaceChange() {
@@ -381,6 +442,8 @@ export function registerGitHandlers(
       };
     }
 
+    const nestedPathStates = await loadNestedGitPathStates(root);
+
     try {
       const stdout = await execGitStatus(root);
       const { branchName, pathStates } = parseGitStatus(stdout);
@@ -389,14 +452,17 @@ export function registerGitHandlers(
         branchName,
         hasProjectFiles: true,
         isGitRepo: true,
-        pathStates,
+        pathStates: {
+          ...pathStates,
+          ...nestedPathStates,
+        },
       };
     } catch {
       return {
         branchName: null,
         hasProjectFiles: true,
         isGitRepo: false,
-        pathStates: {},
+        pathStates: nestedPathStates,
       };
     }
   });

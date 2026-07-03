@@ -136,6 +136,13 @@ describe('CreateProjectDialog', () => {
 
     vi.mocked(window.electronAPI!.project.createProject).mockResolvedValueOnce({
       project: {
+        config: {
+          mgnt: 'none',
+          mode: 'rtl2gds',
+          padframe: 'QFN32',
+          process: 'ics55',
+          type: 'retroSoC',
+        },
         name: 'Project name',
         rootPath: 'C:\\Projects\\Project name',
         session: null,

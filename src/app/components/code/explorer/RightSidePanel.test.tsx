@@ -241,7 +241,7 @@ describe('RightSidePanel', () => {
     expect(screen.getByTestId('right-panel-primary-panel')).not.toHaveClass('rounded-md', 'border', 'border-ide-border');
     expect(screen.queryByTestId('right-panel-secondary-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('right-panel-split-resize-handle')).not.toBeInTheDocument();
-  }, 10_000);
+  }, PANEL_TEST_TIMEOUT_MS + PANEL_ITEM_TIMEOUT_MS);
 
   it('keeps stacked right panels layout-aware in minimal mode', async () => {
     const user = userEvent.setup();

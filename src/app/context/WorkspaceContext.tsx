@@ -31,6 +31,10 @@ import {
 } from './useWorkspaceEditorState';
 import { useWorkspaceFileStore, type SaveFilesResult } from './useWorkspaceFileStore';
 import { useWorkspaceSessionStore } from './useWorkspaceSessionStore';
+import { useBottomPanelStore } from '../components/code/explorer/useBottomPanelStore';
+import { useSidePanelSessionStore } from '../components/code/explorer/useSidePanelSessionStore';
+import { useExplorerTreeSessionStore } from '../workspace/useExplorerTreeSessionStore';
+import { stopWslDevelopmentEnvironmentAndRestore } from '../wsl/wslDevelopmentEnvironmentLifecycle';
 import type { WindowCloseRequest } from '../window/windowClose';
 import { refreshWorkspaceGitStatus } from '../git/workspaceGitStatus';
 import {
@@ -85,6 +89,7 @@ interface WorkspacePasteResult {
 interface WorkspaceState {
   currentProject: ProjectState | null;
   hasOpenProject: boolean;
+  workspaceBootstrapStatus: 'bootstrapping' | 'ready';
   captureProjectSessionSnapshot: () => ProjectSessionSnapshot;
   flushProjectSession: () => Promise<void>;
   openProject: () => Promise<void>;
@@ -189,6 +194,7 @@ type WorkspaceViewState = Pick<
   WorkspaceState,
   | 'currentProject'
   | 'hasOpenProject'
+  | 'workspaceBootstrapStatus'
   | 'activeView'
   | 'setActiveView'
   | 'mainContentView'
@@ -207,6 +213,7 @@ type WorkspaceProjectState = Pick<
   WorkspaceState,
   | 'currentProject'
   | 'hasOpenProject'
+  | 'workspaceBootstrapStatus'
   | 'captureProjectSessionSnapshot'
   | 'flushProjectSession'
   | 'openProject'
@@ -579,6 +586,8 @@ export function useWorkspaceDialogs(): WorkspaceDialogState {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const currentProject = useWorkspaceSessionStore((state) => state.currentProject);
   const setCurrentProject = useWorkspaceSessionStore((state) => state.setCurrentProject);
+  const workspaceBootstrapStatus = useWorkspaceSessionStore((state) => state.workspaceBootstrapStatus);
+  const setWorkspaceBootstrapStatus = useWorkspaceSessionStore((state) => state.setWorkspaceBootstrapStatus);
   const activeView = useWorkspaceSessionStore((state) => state.activeView);
   const setActiveView = useWorkspaceSessionStore((state) => state.setActiveView);
   const mainContentView = useWorkspaceSessionStore((state) => state.mainContentView);
@@ -590,6 +599,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const captureWorkspaceSessionState = useWorkspaceSessionStore((state) => state.captureSessionState);
   const hydrateWorkspaceProjectSession = useWorkspaceSessionStore((state) => state.hydrateProjectSession);
   const resetWorkspaceProjectSession = useWorkspaceSessionStore((state) => state.resetProjectSession);
+  const captureBottomPanelSession = useBottomPanelStore((state) => state.captureProjectBottomPanelSession);
+  const hydrateBottomPanelSession = useBottomPanelStore((state) => state.hydrateProjectBottomPanelSession);
+  const captureSidePanelSession = useSidePanelSessionStore((state) => state.captureProjectSidePanelSession);
+  const hydrateSidePanelSession = useSidePanelSessionStore((state) => state.hydrateProjectSidePanelSession);
+  const captureExplorerTreeSession = useExplorerTreeSessionStore((state) => state.captureProjectExplorerTreeSession);
+  const hydrateExplorerTreeSession = useExplorerTreeSessionStore((state) => state.hydrateProjectExplorerTreeSession);
   const setPanelStateForView = useWorkspaceSessionStore((state) => state.setPanelStateForView);
   const setProjectPanelWidthInStore = useWorkspaceSessionStore((state) => state.setProjectPanelWidth);
   const editorWorkspace = useWorkspaceEditorState();
@@ -660,13 +675,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setWorkspaceClipboard(null);
     setUntitledFiles({});
     resetWorkspaceProjectSession();
+    hydrateBottomPanelSession(null);
+    hydrateSidePanelSession(null);
+    hydrateExplorerTreeSession(null);
     fileIdRedirectsRef.current = {};
     previousEditorGroupsRef.current = EMPTY_EDITOR_GROUPS;
-  }, [resetWorkspaceProjectSession]);
+  }, [hydrateBottomPanelSession, hydrateExplorerTreeSession, hydrateSidePanelSession, resetWorkspaceProjectSession]);
 
   const hydrateProjectSession = useCallback((snapshot: ProjectSessionSnapshot | null | undefined) => {
     resetWorkspaceForProject();
     hydrateWorkspaceProjectSession(snapshot);
+    hydrateBottomPanelSession(snapshot?.bottomPanelSession);
+    hydrateSidePanelSession(snapshot?.sidePanelSession);
+    hydrateExplorerTreeSession(snapshot?.explorerTreeSession);
 
     if (!snapshot) {
       return;
@@ -677,7 +698,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       editorLayout: snapshot.editorLayout,
       focusedGroupId: snapshot.focusedGroupId,
     });
-  }, [hydrateWorkspaceProjectSession, resetWorkspaceForProject]);
+  }, [
+    hydrateBottomPanelSession,
+    hydrateExplorerTreeSession,
+    hydrateSidePanelSession,
+    hydrateWorkspaceProjectSession,
+    resetWorkspaceForProject,
+  ]);
 
   const captureProjectSessionSnapshot = useCallback((): ProjectSessionSnapshot => {
     const sessionState = captureWorkspaceSessionState();
@@ -685,15 +712,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return {
       activeTabId: resolveCurrentFileId(editorWorkspaceRef.current.activeTabId),
       activeView: sessionState.activeView,
+      bottomPanelSession: captureBottomPanelSession(),
       editorGroups: editorWorkspaceRef.current.editorGroups,
       editorLayout: editorWorkspaceRef.current.editorLayout,
+      explorerTreeSession: captureExplorerTreeSession(),
       focusedGroupId: editorWorkspaceRef.current.focusedGroupId,
       mainContentView: sessionState.mainContentView,
       panelStateByView: sessionState.panelStateByView,
       panelWidths: sessionState.panelWidths,
+      sidePanelSession: captureSidePanelSession(),
       version: 1,
     };
-  }, [captureWorkspaceSessionState, resolveCurrentFileId]);
+  }, [
+    captureBottomPanelSession,
+    captureExplorerTreeSession,
+    captureSidePanelSession,
+    captureWorkspaceSessionState,
+    resolveCurrentFileId,
+  ]);
 
   const setProjectPanelWidth = useCallback((key: string, value: number | ((current: number | undefined) => number)) => {
     setProjectPanelWidthInStore(key, value);
@@ -709,9 +745,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const projectApi = typeof window === 'undefined' ? undefined : window.electronAPI?.project;
+    const markBootstrapReady = () => {
+      setWorkspaceBootstrapStatus('ready');
+      void window.electronAPI?.markWorkspaceReady?.();
+    };
+
     if (!projectApi) {
       hydrateProjectSession(null);
       setCurrentProject(null);
+      markBootstrapReady();
       return undefined;
     }
 
@@ -727,6 +769,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         bumpWorkspaceTreeRefreshToken();
       }
       refreshWorkspaceGitStatus();
+      markBootstrapReady();
     }).catch(() => {
       if (disposed) {
         return;
@@ -734,6 +777,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       setCurrentProject(null);
       hydrateProjectSession(null);
+      markBootstrapReady();
     });
 
     const disposeProjectChanged = projectApi.onProjectChanged((project) => {
@@ -747,7 +791,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       disposed = true;
       disposeProjectChanged?.();
     };
-  }, [bumpWorkspaceTreeRefreshToken, hydrateProjectSession]);
+  }, [bumpWorkspaceTreeRefreshToken, hydrateProjectSession, setCurrentProject, setWorkspaceBootstrapStatus]);
 
   useEffect(() => {
     const electronApi = typeof window === 'undefined' ? undefined : window.electronAPI;
@@ -1577,6 +1621,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       void (async () => {
         const dirtyFileIds = fileStoreRef.current.dirtyFileIds;
         if (dirtyFileIds.length === 0) {
+          await stopWslDevelopmentEnvironmentAndRestore({ notifyOnError: true });
           await flushProjectSession();
           await electronApi.resolveCloseRequest(request.requestId, 'proceed');
           return;
@@ -1589,6 +1634,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        await stopWslDevelopmentEnvironmentAndRestore({ notifyOnError: true });
         await flushProjectSession();
         await electronApi.resolveCloseRequest(request.requestId, 'proceed');
       })();
@@ -1631,6 +1677,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const workspaceValue = useMemo<WorkspaceState>(() => ({
     currentProject,
     hasOpenProject: Boolean(currentProject),
+    workspaceBootstrapStatus,
     captureProjectSessionSnapshot,
     flushProjectSession,
     openProject,
@@ -1803,11 +1850,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     workspaceTreeRefreshToken,
     flushProjectSession,
     projectPanelWidths,
+    workspaceBootstrapStatus,
   ]);
 
   const workspaceViewValue = useMemo<WorkspaceViewState>(() => ({
     currentProject: workspaceValue.currentProject,
     hasOpenProject: workspaceValue.hasOpenProject,
+    workspaceBootstrapStatus: workspaceValue.workspaceBootstrapStatus,
     activeView: workspaceValue.activeView,
     setActiveView: workspaceValue.setActiveView,
     mainContentView: workspaceValue.mainContentView,
@@ -1825,6 +1874,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     workspaceValue.canToggleLayoutPanels,
     workspaceValue.currentProject,
     workspaceValue.hasOpenProject,
+    workspaceValue.workspaceBootstrapStatus,
     workspaceValue.mainContentView,
     workspaceValue.setActiveView,
     workspaceValue.setMainContentView,
@@ -1840,6 +1890,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const workspaceProjectValue = useMemo<WorkspaceProjectState>(() => ({
     currentProject: workspaceValue.currentProject,
     hasOpenProject: workspaceValue.hasOpenProject,
+    workspaceBootstrapStatus: workspaceValue.workspaceBootstrapStatus,
     captureProjectSessionSnapshot: workspaceValue.captureProjectSessionSnapshot,
     flushProjectSession: workspaceValue.flushProjectSession,
     openProject: workspaceValue.openProject,
@@ -1852,6 +1903,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     workspaceValue.currentProject,
     workspaceValue.flushProjectSession,
     workspaceValue.hasOpenProject,
+    workspaceValue.workspaceBootstrapStatus,
     workspaceValue.openProject,
     workspaceValue.projectPanelWidths,
     workspaceValue.setProjectPanelWidth,

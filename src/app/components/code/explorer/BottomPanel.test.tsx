@@ -329,7 +329,7 @@ describe('BottomPanel', () => {
     expect(terminateAllTerminalSessionsMock).toHaveBeenCalled();
   });
 
-  it('splits the focused pane and opens terminal or placeholder content from the new pane menu', async () => {
+  it('keeps split panes scoped to the active tab and opens panel content from the new pane menu', async () => {
     const user = userEvent.setup();
 
     render(<BottomPanel />);
@@ -363,11 +363,14 @@ describe('BottomPanel', () => {
 
     expect(screen.getByText('Placeholder A')).toBeInTheDocument();
 
-    await user.click(screen.getByTestId('bottom-panel-pane-bottom-pane-2'));
+    await clickBottomTab(user, 'lsp');
+
+    expect(screen.getByTestId('bottom-panel-pane-bottom-pane-lsp-1')).toBeInTheDocument();
+    expect(screen.queryByText('Placeholder A')).not.toBeInTheDocument();
+
     await clickBottomTab(user, 'terminal');
 
-    const secondTerminal = await screen.findByTestId('terminal-host-bottom-pane-2');
-    expect(secondTerminal).toHaveAttribute('data-session-key', 'bottom-pane-2');
+    expect(screen.getByText('Placeholder A')).toBeInTheDocument();
   });
 
   it('does not split panes below the minimum width threshold', async () => {
@@ -395,6 +398,40 @@ describe('BottomPanel', () => {
     await user.click(screen.getByTestId('bottom-panel-split'));
 
     expect(screen.getAllByTestId(/bottom-panel-pane-bottom-pane-/)).toHaveLength(1);
+  });
+
+  it('keeps Open menu content inside the current active tab layout', async () => {
+    const user = userEvent.setup();
+
+    render(<BottomPanel />);
+
+    await clickBottomTab(user, 'lsp');
+
+    const lspPane = screen.getByTestId('bottom-panel-pane-bottom-pane-lsp-1');
+    vi.spyOn(lspPane, 'getBoundingClientRect').mockReturnValue({
+      bottom: 200,
+      height: 200,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    await user.click(screen.getByTestId('bottom-panel-split'));
+    await user.click(screen.getByTestId('bottom-panel-open-pane-bottom-pane-lsp-2'));
+    await user.click(await screen.findByTestId('bottom-panel-open-schematic-bottom-pane-lsp-2'));
+
+    expect(screen.getByTestId('bottom-panel-tab-lsp')).toHaveAttribute('data-state', 'on');
+    expect(await screen.findByTestId('asic-schematic-panel')).toBeInTheDocument();
+
+    await clickBottomTab(user, 'terminal');
+    expect(screen.queryByTestId('asic-schematic-panel')).not.toBeInTheDocument();
+
+    await clickBottomTab(user, 'lsp');
+    expect(await screen.findByTestId('asic-schematic-panel')).toBeInTheDocument();
   });
 
   it('removes the focused split pane and terminates its terminal session', async () => {

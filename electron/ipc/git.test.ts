@@ -8,10 +8,12 @@ vi.mock('electron', () => ({
 
 const mockReadDir = vi.fn();
 const mockReadFile = vi.fn();
+const mockStat = vi.fn();
 vi.mock('node:fs/promises', () => ({
   default: {
     readdir: (...args: unknown[]) => mockReadDir(...args),
     readFile: (...args: unknown[]) => mockReadFile(...args),
+    stat: (...args: unknown[]) => mockStat(...args),
   },
 }));
 
@@ -31,13 +33,18 @@ function getHandler(channel: string): (...args: unknown[]) => Promise<unknown> {
   return call[1];
 }
 
-function createDirent(name: string) {
-  return { name };
+function createDirent(name: string, type: 'directory' | 'file' = 'directory') {
+  return {
+    name,
+    isDirectory: () => type === 'directory',
+    isFile: () => type === 'file',
+  };
 }
 
 describe('git IPC handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockStat.mockRejectedValue(new Error('ENOENT'));
     setGitProjectRoot('C:/workspace/project-root');
     registerGitHandlers();
   });
@@ -133,6 +140,144 @@ describe('git IPC handlers', () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it('merges first-level child git repository path states under the child directory prefix', async () => {
+    mockReadDir.mockImplementation((targetPath: string) => {
+      if (targetPath.endsWith('project-root')) {
+        return Promise.resolve([createDirent('rtl'), createDirent('ip')]);
+      }
+
+      return Promise.resolve([]);
+    });
+    mockStat.mockImplementation((targetPath: string) => {
+      if (targetPath.replace(/\\/g, '/').endsWith('/ip/.git')) {
+        return Promise.resolve({
+          isDirectory: () => true,
+          isFile: () => false,
+        });
+      }
+
+      return Promise.reject(new Error('ENOENT'));
+    });
+    mockExecFile.mockImplementation((
+      _command: string,
+      _args: string[],
+      options: { cwd: string },
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      if (options.cwd.replace(/\\/g, '/').endsWith('/ip')) {
+        callback(null, [
+          '## child-main',
+          ' M src/child_core.sv',
+          '?? generated/new_child.sv',
+        ].join('\n'), '');
+        return;
+      }
+
+      callback(null, [
+        '## root-main',
+        ' M rtl/root_core.sv',
+      ].join('\n'), '');
+    });
+
+    const handler = getHandler('async:git:get-status');
+    await expect(handler({})).resolves.toEqual({
+      branchName: 'root-main',
+      hasProjectFiles: true,
+      isGitRepo: true,
+      pathStates: {
+        'ip/generated/new_child.sv': 'created',
+        'ip/src/child_core.sv': 'modified',
+        'rtl/root_core.sv': 'modified',
+      },
+    });
+  });
+
+  it('keeps child git repository states when the workspace root is not a git repository', async () => {
+    mockReadDir.mockImplementation((targetPath: string) => {
+      if (targetPath.endsWith('project-root')) {
+        return Promise.resolve([createDirent('ip')]);
+      }
+
+      return Promise.resolve([]);
+    });
+    mockStat.mockImplementation((targetPath: string) => {
+      if (targetPath.replace(/\\/g, '/').endsWith('/ip/.git')) {
+        return Promise.resolve({
+          isDirectory: () => false,
+          isFile: () => true,
+        });
+      }
+
+      return Promise.reject(new Error('ENOENT'));
+    });
+    mockExecFile.mockImplementation((
+      _command: string,
+      _args: string[],
+      options: { cwd: string },
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      if (options.cwd.replace(/\\/g, '/').endsWith('/ip')) {
+        callback(null, '## child-main\n M src/child_core.sv\n', '');
+        return;
+      }
+
+      callback(new Error('fatal: not a git repository'), '', 'fatal: not a git repository');
+    });
+
+    const handler = getHandler('async:git:get-status');
+    await expect(handler({})).resolves.toEqual({
+      branchName: null,
+      hasProjectFiles: true,
+      isGitRepo: false,
+      pathStates: {
+        'ip/src/child_core.sv': 'modified',
+      },
+    });
+  });
+
+  it('ignores child git repositories that cannot be read', async () => {
+    mockReadDir.mockImplementation((targetPath: string) => {
+      if (targetPath.endsWith('project-root')) {
+        return Promise.resolve([createDirent('broken-ip'), createDirent('rtl')]);
+      }
+
+      return Promise.resolve([]);
+    });
+    mockStat.mockImplementation((targetPath: string) => {
+      if (targetPath.replace(/\\/g, '/').endsWith('/broken-ip/.git')) {
+        return Promise.resolve({
+          isDirectory: () => true,
+          isFile: () => false,
+        });
+      }
+
+      return Promise.reject(new Error('ENOENT'));
+    });
+    mockExecFile.mockImplementation((
+      _command: string,
+      _args: string[],
+      options: { cwd: string },
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      if (options.cwd.replace(/\\/g, '/').endsWith('/broken-ip')) {
+        callback(new Error('fatal: child repository is broken'), '', 'fatal');
+        return;
+      }
+
+      callback(null, '## root-main\n M rtl/root_core.sv\n', '');
+    });
+
+    const handler = getHandler('async:git:get-status');
+    await expect(handler({})).resolves.toEqual({
+      branchName: 'root-main',
+      hasProjectFiles: true,
+      isGitRepo: true,
+      pathStates: {
+        'rtl/root_core.sv': 'modified',
+      },
+    });
   });
 
   it('extracts the branch name for unborn branches', async () => {

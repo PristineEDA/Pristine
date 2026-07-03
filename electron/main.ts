@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, screen, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Menu, Tray, screen, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,12 +16,17 @@ import { flushPendingConfigSave, getConfigValue } from './ipc/config.js';
 import { PROJECT_LAST_ROOT_CONFIG_KEY, disposeProjectService, tryOpenStartupProject } from './ipc/project.js';
 import { disposeLspSession } from './ipc/lsp.js';
 import { disposeAllTerminalSessions } from './ipc/terminal.js';
+import { stopPristineEdaEnvironment } from './ipc/wsl.js';
 import type { WindowCloseDecision, WindowCloseRequest } from '../src/app/window/windowClose.js';
 import type { FloatingInfoWindowMode } from '../src/app/window/floatingInfoWindow.js';
+import type { ProjectWindowState } from '../types/project.js';
 import { handleAuthCallbackUrl, isAuthProtocolUrl } from './ipc/auth.js';
+import { createAppLogoNativeImage } from './appLogo.js';
+import { ensureWindowsNotificationShortcut } from './windowsNotificationIdentity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MINIMUM_SPLASH_DURATION_MS = 3000;
+const WORKSPACE_READY_TIMEOUT_MS = 1500;
 const CLOSE_ACTION_CONFIG_KEY = 'window.closeActionPreference';
 const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
 const WORKBENCH_COLOR_THEME_KIND_CONFIG_KEY = 'workbench.colorThemeKind';
@@ -51,8 +56,23 @@ let isQuitting = false;
 let nextWindowCloseRequestId = 1;
 let pendingWindowCloseRequest: WindowCloseRequest | null = null;
 let pendingAuthCallbackUrl: string | null = null;
+let pendingProjectWindowState: ProjectWindowState | null = null;
+let resolveWorkspaceReady: (() => void) | null = null;
+let workspaceReadyPromise: Promise<void> = Promise.resolve();
 
 app.setName(APP_DISPLAY_NAME);
+
+function resetWorkspaceReadyWait(): Promise<void> {
+  workspaceReadyPromise = new Promise((resolve) => {
+    resolveWorkspaceReady = resolve;
+  });
+  return workspaceReadyPromise;
+}
+
+function markWorkspaceReady(): void {
+  resolveWorkspaceReady?.();
+  resolveWorkspaceReady = null;
+}
 
 function configureElectronStoragePaths(): void {
   const isDev = Boolean(process.env['VITE_DEV_SERVER_URL']);
@@ -72,6 +92,53 @@ function configureElectronStoragePaths(): void {
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow;
+}
+
+function getProjectWindowState(): ProjectWindowState | null {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return null;
+  }
+
+  const bounds = mainWindow.isMaximized()
+    ? mainWindow.getNormalBounds()
+    : mainWindow.getBounds();
+
+  return {
+    bounds: {
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height),
+    },
+    maximized: mainWindow.isMaximized(),
+  };
+}
+
+function applyProjectWindowState(windowState: ProjectWindowState | null | undefined): void {
+  pendingProjectWindowState = windowState ?? null;
+
+  if (!pendingProjectWindowState || !mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  const bounds = pendingProjectWindowState.bounds;
+  if (bounds) {
+    mainWindow.setBounds(bounds, false);
+  }
+}
+
+function applyPendingProjectWindowVisibilityState(window: BrowserWindow): void {
+  if (!pendingProjectWindowState || mainWindow !== window || window.isDestroyed()) {
+    return;
+  }
+
+  if (pendingProjectWindowState.maximized) {
+    window.maximize();
+  } else if (window.isMaximized()) {
+    window.unmaximize();
+  }
+
+  pendingProjectWindowState = null;
 }
 
 function findAuthCallbackUrl(args: readonly string[]): string | null {
@@ -176,17 +243,6 @@ function withRendererSurfaceQuery(rendererUrl: string, backgroundColor: string):
   return url.toString();
 }
 
-function createTrayIcon() {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-      <rect width="16" height="16" rx="4" fill="#0f172a"/>
-      <path d="M5 3.5h3.9c2.04 0 3.1 1.03 3.1 2.78 0 1.16-.52 1.96-1.47 2.39.79.28 1.72 1.01 1.72 2.59 0 2.03-1.32 3.24-3.64 3.24H5V3.5Zm2.08 4.44h1.52c.89 0 1.38-.45 1.38-1.25 0-.77-.49-1.17-1.38-1.17H7.08v2.42Zm0 4.54h1.73c1.05 0 1.58-.46 1.58-1.37 0-.9-.53-1.34-1.58-1.34H7.08v2.71Z" fill="#f8fafc"/>
-    </svg>
-  `.trim();
-
-  return nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
-}
-
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     createStartupWindows();
@@ -205,7 +261,7 @@ function showMainWindow(): void {
 }
 
 function dispatchRendererMenuActionFromApplicationMenu(
-  action: Extract<AppMenuAction, 'open-new-project' | 'open-project' | 'close-project' | 'open-settings' | 'open-about' | 'open-notice-files'>,
+  action: Extract<AppMenuAction, 'open-new-project' | 'open-project' | 'close-project' | 'open-settings' | 'open-about' | 'open-notice-files' | 'run-notification-progress-demo'>,
 ): void {
   const existingWindow = mainWindow;
 
@@ -236,6 +292,7 @@ function handleApplicationMenuAction(action: AppMenuAction): void {
     || action === 'open-settings'
     || action === 'open-about'
     || action === 'open-notice-files'
+    || action === 'run-notification-progress-demo'
   ) {
     dispatchRendererMenuActionFromApplicationMenu(action);
     return;
@@ -408,6 +465,7 @@ function createFloatingInfoWindow(): BrowserWindow {
     show: false,
     title: FLOATING_INFO_WINDOW_TITLE,
     backgroundColor,
+    icon: createAppLogoNativeImage(256),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -537,7 +595,7 @@ function createTray(): Tray {
     return tray;
   }
 
-  const nextTray = new Tray(createTrayIcon());
+  const nextTray = new Tray(createAppLogoNativeImage(32));
   const trayMenu = createTrayMenu();
 
   nextTray.setToolTip('Pristine');
@@ -568,6 +626,7 @@ function createSplashWindow(): BrowserWindow {
     skipTaskbar: true,
     backgroundColor,
     autoHideMenuBar: true,
+    icon: createAppLogoNativeImage(256),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -607,6 +666,7 @@ function createMainWindow(): BrowserWindow {
     backgroundColor,
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
     trafficLightPosition: isMac ? { x: 12, y: 10 } : undefined,
+    icon: createAppLogoNativeImage(256),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -618,6 +678,7 @@ function createMainWindow(): BrowserWindow {
 
   mainWindow = window;
   setupWindowStreams(window);
+  applyProjectWindowState(pendingProjectWindowState);
 
   // Dev mode: load Vite dev server; Prod mode: load built files
   if (process.env['VITE_DEV_SERVER_URL']) {
@@ -659,9 +720,19 @@ function waitForMinimumSplashDuration(): Promise<void> {
   });
 }
 
+function waitForWorkspaceReady(): Promise<void> {
+  return Promise.race([
+    workspaceReadyPromise,
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, WORKSPACE_READY_TIMEOUT_MS);
+    }),
+  ]);
+}
+
 function showMainWindowWhenReady(window: BrowserWindow, splash: BrowserWindow): void {
-  void Promise.all([waitForWindowReady(window), waitForMinimumSplashDuration()]).then(() => {
+  void Promise.all([waitForWindowReady(window), waitForMinimumSplashDuration(), waitForWorkspaceReady()]).then(() => {
     if (mainWindow === window) {
+      applyPendingProjectWindowVisibilityState(window);
       window.show();
     }
 
@@ -672,6 +743,7 @@ function showMainWindowWhenReady(window: BrowserWindow, splash: BrowserWindow): 
 }
 
 function createStartupWindows(): void {
+  resetWorkspaceReadyWait();
   const splash = createSplashWindow();
   const window = createMainWindow();
 
@@ -682,7 +754,7 @@ configureElectronStoragePaths();
 tryOpenStartupProject(resolveStartupProjectRoot(
   process.env['PRISTINE_PROJECT_ROOT'],
   getConfigValue(PROJECT_LAST_ROOT_CONFIG_KEY),
-), setProjectRoot);
+), setProjectRoot, applyProjectWindowState);
 registerDeepLinkProtocol();
 
 const singleInstanceLock = app.requestSingleInstanceLock();
@@ -709,10 +781,14 @@ if (!singleInstanceLock) {
     setFloatingInfoWindowExpanded,
     setFloatingInfoWindowMode,
     resolveWindowCloseRequest,
+    getProjectWindowState,
+    applyProjectWindowState,
+    markWorkspaceReady,
   );
 
   app.whenReady().then(() => {
     installApplicationMenu();
+    ensureWindowsNotificationShortcut();
     createTray();
     createStartupWindows();
 
@@ -744,8 +820,9 @@ if (!singleInstanceLock) {
 
   app.on('before-quit', () => {
     isQuitting = true;
+    void stopPristineEdaEnvironment().catch(() => undefined);
     flushPendingConfigSave();
-    disposeProjectService();
+    disposeProjectService(getProjectWindowState);
     disposeLspSession();
     disposeAllTerminalSessions();
     tray?.destroy();

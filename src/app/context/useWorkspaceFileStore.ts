@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import { refreshWorkspaceGitStatus } from '../git/workspaceGitStatus';
 import {
   isAbsoluteFilePath,
@@ -92,7 +93,7 @@ export function useWorkspaceFileStore() {
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
   const fileContentsRef = useRef<Record<string, string>>({});
   const savedFileContentsRef = useRef<Record<string, string>>({});
-  const inFlightLoadsRef = useRef<Set<string>>(new Set());
+  const inFlightLoadsRef = useLazyRef(() => new Set<string>());
   const isMountedRef = useRef(true);
 
   const loadFileContent = useCallback((fileId: string) => {

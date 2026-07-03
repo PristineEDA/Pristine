@@ -5,7 +5,12 @@ type BrowserWindowInstance = {
   options: Record<string, unknown>;
   loadURL: Mock<(url: string) => void>;
   loadFile: Mock<(filePath: string) => void>;
+  getBounds: Mock<() => { x: number; y: number; width: number; height: number }>;
+  getNormalBounds: Mock<() => { x: number; y: number; width: number; height: number }>;
   setBounds: Mock<(bounds: { x: number; y: number; width: number; height: number }, animate?: boolean) => void>;
+  maximize: Mock<() => void>;
+  unmaximize: Mock<() => void>;
+  isMaximized: Mock<() => boolean>;
   webContents: {
     send: Mock<(channel: string, ...args: unknown[]) => void>;
     isDestroyed: Mock<() => boolean>;
@@ -25,6 +30,7 @@ type BrowserWindowInstance = {
 };
 
 type TrayInstance = {
+  icon: unknown;
   setToolTip: Mock<(tooltip: string) => void>;
   setContextMenu: Mock<(menu: unknown) => void>;
   popUpContextMenu: Mock<(menu?: unknown) => void>;
@@ -50,12 +56,22 @@ const mocks = vi.hoisted(() => {
     options: Record<string, unknown>;
     loadURL = vi.fn();
     loadFile = vi.fn();
+    getBounds = vi.fn(() => ({ x: 10, y: 20, width: 1440, height: 900 }));
+    getNormalBounds = vi.fn(() => ({ x: 10, y: 20, width: 1440, height: 900 }));
     setBounds = vi.fn();
+    maximize = vi.fn(() => {
+      this.maximized = true;
+    });
+    unmaximize = vi.fn(() => {
+      this.maximized = false;
+    });
+    isMaximized = vi.fn(() => this.maximized);
     webContents = {
       send: vi.fn(),
       isDestroyed: vi.fn(() => false),
     };
     private visible: boolean;
+    private maximized = false;
     show = vi.fn(() => {
       this.visible = true;
     });
@@ -129,7 +145,10 @@ const mocks = vi.hoisted(() => {
     destroy = vi.fn();
     private handlers = new Map<string, (...args: unknown[]) => void>();
 
-    constructor() {
+    icon: unknown;
+
+    constructor(icon: unknown) {
+      this.icon = icon;
       trayInstances.push(this as unknown as TrayInstance);
     }
 
@@ -167,12 +186,17 @@ const mocks = vi.hoisted(() => {
     mockRequestSingleInstanceLock: vi.fn(() => true),
     mockBuildFromTemplate: vi.fn((template: unknown[]) => ({ template })),
     mockSetApplicationMenu: vi.fn(),
-    mockCreateFromDataURL: vi.fn(() => ({ kind: 'native-image' })),
+    mockWriteShortcutLink: vi.fn(() => true),
+    mockExistsSync: vi.fn<(filePath: string) => boolean>(() => true),
+    mockCreateFromDataURL: vi.fn(() => ({ kind: 'native-image-data-url' })),
+    mockCreateFromPath: vi.fn((filePath: string) => ({ kind: 'native-image-path', path: filePath })),
+    mockCreateEmpty: vi.fn(() => ({ kind: 'native-image-empty' })),
     mockDisposeLspSession: vi.fn(),
     mockDisposeAllTerminalSessions: vi.fn(),
     mockFlushPendingConfigSave: vi.fn(),
     mockGetConfigValue: vi.fn<(key: string) => unknown>(() => null),
     mockDisposeProjectService: vi.fn(),
+    mockStopPristineEdaEnvironment: vi.fn(() => Promise.resolve({ ok: true })),
     mockRegisterAllHandlers: vi.fn(),
     mockSetProjectRoot: vi.fn(),
     mockSetupWindowStreams: vi.fn(),
@@ -184,6 +208,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('node:fs', () => ({
   default: {
+    existsSync: (filePath: string) => mocks.mockExistsSync(filePath),
     mkdirSync: (...args: unknown[]) => mocks.mockMkdirSync(...args),
   },
 }));
@@ -206,8 +231,13 @@ vi.mock('electron', () => ({
     setApplicationMenu: mocks.mockSetApplicationMenu,
   },
   Tray: mocks.TrayMock,
+  shell: {
+    writeShortcutLink: mocks.mockWriteShortcutLink,
+  },
   nativeImage: {
     createFromDataURL: mocks.mockCreateFromDataURL,
+    createFromPath: mocks.mockCreateFromPath,
+    createEmpty: mocks.mockCreateEmpty,
   },
   screen: {
     getPrimaryDisplay: () => ({
@@ -229,6 +259,10 @@ vi.mock('./ipc/register.js', () => ({
 
 vi.mock('./ipc/terminal.js', () => ({
   disposeAllTerminalSessions: (...args: unknown[]) => mocks.mockDisposeAllTerminalSessions(...args),
+}));
+
+vi.mock('./ipc/wsl.js', () => ({
+  stopPristineEdaEnvironment: () => mocks.mockStopPristineEdaEnvironment(),
 }));
 
 vi.mock('./ipc/lsp.js', () => ({
@@ -285,9 +319,15 @@ async function importMain(options?: {
   mocks.mockQuit.mockClear();
   mocks.mockBuildFromTemplate.mockClear();
   mocks.mockSetApplicationMenu.mockClear();
+  mocks.mockWriteShortcutLink.mockClear();
+  mocks.mockExistsSync.mockReset();
+  mocks.mockExistsSync.mockImplementation(() => true);
   mocks.mockCreateFromDataURL.mockClear();
+  mocks.mockCreateFromPath.mockClear();
+  mocks.mockCreateEmpty.mockClear();
   mocks.mockDisposeLspSession.mockClear();
   mocks.mockDisposeAllTerminalSessions.mockClear();
+  mocks.mockStopPristineEdaEnvironment.mockClear();
   mocks.mockDisposeProjectService.mockClear();
   mocks.mockFlushPendingConfigSave.mockClear();
   mocks.mockGetConfigValue.mockReset();
@@ -296,8 +336,18 @@ async function importMain(options?: {
   mocks.mockSetProjectRoot.mockClear();
   mocks.mockSetupWindowStreams.mockClear();
   mocks.mockTryOpenStartupProject.mockClear();
-  mocks.mockTryOpenStartupProject.mockImplementation((_root: string | null, applyProjectRoot: (root: string | null) => void) => {
+  mocks.mockTryOpenStartupProject.mockImplementation((
+    _root: string | null,
+    applyProjectRoot: (root: string | null) => void,
+    applyWindowState?: (windowState: unknown) => void,
+  ) => {
     applyProjectRoot(_root);
+    if (_root) {
+      applyWindowState?.({
+        bounds: { height: 720, width: 1280, x: 44, y: 55 },
+        maximized: true,
+      });
+    }
     return _root ? { name: path.basename(_root), rootPath: _root, session: null } : null;
   });
     mocks.mockHandleAuthCallbackUrl.mockClear();
@@ -338,6 +388,7 @@ async function importMain(options?: {
     setFloatingInfoExpanded: mocks.mockRegisterAllHandlers.mock.calls[0]?.[2] as ((expanded: boolean) => boolean) | undefined,
     setFloatingInfoMode: mocks.mockRegisterAllHandlers.mock.calls[0]?.[3] as ((mode: 'collapsed' | 'expanded' | 'detail') => boolean) | undefined,
     resolveCloseRequest: mocks.mockRegisterAllHandlers.mock.calls[0]?.[4] as ((requestId: number, decision: 'proceed' | 'cancel') => boolean) | undefined,
+    markWorkspaceReady: mocks.mockRegisterAllHandlers.mock.calls[0]?.[5] as (() => void) | undefined,
   };
 }
 
@@ -413,7 +464,7 @@ describe('electron main entry', () => {
     expect(mocks.mockRegisterAllHandlers).toHaveBeenCalledTimes(1);
     expect(mocks.mockRequestSingleInstanceLock).toHaveBeenCalledTimes(1);
     expect(mocks.mockSetAsDefaultProtocolClient).toHaveBeenCalledWith('pristine');
-    expect(mocks.mockTryOpenStartupProject).toHaveBeenCalledWith(null, expect.any(Function));
+    expect(mocks.mockTryOpenStartupProject).toHaveBeenCalledWith(null, expect.any(Function), expect.any(Function));
     expect(mocks.mockSetProjectRoot).toHaveBeenCalledWith(null);
     expect(mocks.mockMkdirSync).toHaveBeenCalledWith(
       path.join(mocks.mockAppDataPath, 'Pristine', 'dev-profile'),
@@ -427,13 +478,31 @@ describe('electron main entry', () => {
     expect(mocks.mockSetPath).toHaveBeenCalledWith('sessionData', path.join(mocks.mockAppDataPath, 'Pristine', 'dev-profile', 'session-data'));
     expect(trayInstances).toHaveLength(1);
     expect(browserWindowInstances).toHaveLength(2);
+    expect(mocks.mockWriteShortcutLink).toHaveBeenCalledWith(
+      path.join(mocks.mockAppDataPath, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Pristine.lnk'),
+      'update',
+      expect.objectContaining({
+        appUserModelId: 'com.pristine.ide',
+        description: 'Pristine',
+        icon: process.execPath,
+        iconIndex: 0,
+        target: process.execPath,
+        cwd: path.dirname(process.execPath),
+      }),
+    );
 
     const splashWindow = browserWindowInstances[0];
     const mainWindow = browserWindowInstances[1];
 
     expect(getMainWindow?.()).toBe(mainWindow);
     expect(trayInstances[0].setToolTip).toHaveBeenCalledWith('Pristine');
-    expect(mocks.mockCreateFromDataURL).toHaveBeenCalledTimes(1);
+    expect(trayInstances[0].icon).toMatchObject({
+      kind: 'native-image-path',
+      path: expect.stringMatching(/logo-v1-32\.png$/),
+    });
+    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-v1-32\.png$/));
+    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-v1-256\.png$/));
+    expect(mocks.mockCreateEmpty).not.toHaveBeenCalled();
     expect(mocks.mockBuildFromTemplate).toHaveBeenCalledWith([
       expect.objectContaining({ label: 'Open Pristine' }),
       { type: 'separator' },
@@ -442,6 +511,7 @@ describe('electron main entry', () => {
     expect(splashWindow.options).toMatchObject({
       width: 720,
       height: 405,
+      icon: expect.objectContaining({ kind: 'native-image-path' }),
       frame: false,
       resizable: false,
       skipTaskbar: true,
@@ -461,6 +531,7 @@ describe('electron main entry', () => {
       minHeight: 600,
       backgroundColor: '#121314',
       frame: false,
+      icon: expect.objectContaining({ kind: 'native-image-path' }),
       show: false,
       webPreferences: expect.objectContaining({
         nodeIntegration: false,
@@ -470,6 +541,8 @@ describe('electron main entry', () => {
         preload: expect.stringMatching(/preload\.mjs$/),
       }),
     });
+    expect(mainWindow.setBounds).not.toHaveBeenCalled();
+    expect(mainWindow.maximize).not.toHaveBeenCalled();
     expect(mocks.mockSetupWindowStreams).toHaveBeenCalledWith(mainWindow);
     expect(mainWindow.loadURL).toHaveBeenCalledWith('http://127.0.0.1:5173');
     expect(mainWindow.loadFile).not.toHaveBeenCalled();
@@ -494,14 +567,72 @@ describe('electron main entry', () => {
   it('uses the last project root from config when no project env override is present', async () => {
     const configuredRoot = 'C:\\Projects\\chip-lab';
 
-    await importMain({
+    const { browserWindowInstances } = await importMain({
       configValues: {
         'project.lastProjectRoot': configuredRoot,
       },
     });
 
-    expect(mocks.mockTryOpenStartupProject).toHaveBeenCalledWith(configuredRoot, expect.any(Function));
+    expect(mocks.mockTryOpenStartupProject).toHaveBeenCalledWith(configuredRoot, expect.any(Function), expect.any(Function));
     expect(mocks.mockSetProjectRoot).toHaveBeenCalledWith(configuredRoot);
+    const mainWindow = browserWindowInstances[1];
+    expect(mainWindow.setBounds).toHaveBeenCalledWith({ height: 720, width: 1280, x: 44, y: 55 }, false);
+    expect(mainWindow.maximize).not.toHaveBeenCalled();
+    expect(mainWindow.show).not.toHaveBeenCalled();
+  });
+
+  it('shows the startup window after renderer workspace readiness and the minimum splash duration', async () => {
+    const { browserWindowInstances, markWorkspaceReady } = await importMain({
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+    });
+    const splashWindow = browserWindowInstances[0];
+    const mainWindow = browserWindowInstances[1];
+
+    mainWindow.emit('ready-to-show');
+    await vi.advanceTimersByTimeAsync(1000);
+    markWorkspaceReady?.();
+    await Promise.resolve();
+
+    expect(mainWindow.show).not.toHaveBeenCalled();
+    expect(splashWindow.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await Promise.resolve();
+
+    expect(mainWindow.show).toHaveBeenCalledTimes(1);
+    expect(splashWindow.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers restored maximized project window state until the splash handoff is ready', async () => {
+    const { browserWindowInstances, markWorkspaceReady } = await importMain({
+      configValues: {
+        'project.lastProjectRoot': 'C:\\Projects\\chip-lab',
+      },
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+    });
+    const splashWindow = browserWindowInstances[0];
+    const mainWindow = browserWindowInstances[1];
+
+    expect(mainWindow.setBounds).toHaveBeenCalledWith({ height: 720, width: 1280, x: 44, y: 55 }, false);
+    expect(mainWindow.maximize).not.toHaveBeenCalled();
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    mainWindow.emit('ready-to-show');
+    await vi.advanceTimersByTimeAsync(1000);
+    markWorkspaceReady?.();
+    await Promise.resolve();
+
+    expect(mainWindow.maximize).not.toHaveBeenCalled();
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await Promise.resolve();
+
+    expect(mainWindow.maximize).toHaveBeenCalledTimes(1);
+    expect(mainWindow.show).toHaveBeenCalledTimes(1);
+    expect(splashWindow.close).toHaveBeenCalledTimes(1);
   });
 
   it('prefers the project root env override over the configured last project root', async () => {
@@ -514,7 +645,7 @@ describe('electron main entry', () => {
       projectRoot: envRoot,
     });
 
-    expect(mocks.mockTryOpenStartupProject).toHaveBeenCalledWith(envRoot, expect.any(Function));
+    expect(mocks.mockTryOpenStartupProject).toHaveBeenCalledWith(envRoot, expect.any(Function), expect.any(Function));
     expect(mocks.mockSetProjectRoot).toHaveBeenCalledWith(envRoot);
   });
 
@@ -912,6 +1043,7 @@ describe('electron main entry', () => {
     expect(mocks.mockDisposeProjectService).toHaveBeenCalledTimes(1);
     expect(mocks.mockDisposeLspSession).toHaveBeenCalledTimes(1);
     expect(mocks.mockDisposeAllTerminalSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.mockStopPristineEdaEnvironment).toHaveBeenCalledTimes(1);
     expect(trayInstances[0].destroy).toHaveBeenCalledTimes(1);
   });
 });

@@ -51,6 +51,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import { cn } from '@/lib/utils';
 import {
   ComposerAddAttachment,
@@ -164,7 +165,7 @@ const PristineComposerTextarea = forwardRef<HTMLTextAreaElement, ComponentPropsW
   ({ defaultValue, onChange, onCompositionEnd, onCompositionStart, onKeyDown, value, ...props }, ref) => {
     const [isComposing, setIsComposing] = useState(false);
     const [localValue, setLocalValue] = useState(() => toTextareaString(value ?? defaultValue));
-    const lastControlledValueRef = useRef(toTextareaString(value));
+    const lastControlledValueRef = useLazyRef(() => toTextareaString(value));
     const pendingCompositionValueRef = useRef<string | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 

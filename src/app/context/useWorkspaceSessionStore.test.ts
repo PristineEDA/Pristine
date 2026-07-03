@@ -12,6 +12,13 @@ function getStore() {
 
 function createProject(session: ProjectSessionSnapshot | null = null): ProjectState {
   return {
+    config: {
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      padframe: 'QFN32',
+      process: 'ics55',
+      type: 'retroSoC',
+    },
     name: 'chip_lab',
     rootPath: 'C:\\Projects\\chip_lab',
     session,
@@ -60,7 +67,18 @@ describe('useWorkspaceSessionStore', () => {
     expect(state.mainContentView).toBe('code');
     expect(state.panelStateByView).toEqual(DEFAULT_PANEL_STATE_BY_CODE_VIEW);
     expect(state.panelWidths).toEqual({});
+    expect(state.workspaceBootstrapStatus).toBe('bootstrapping');
     expect(state.workspaceTreeRefreshToken).toBe(0);
+  });
+
+  it('tracks workspace bootstrap readiness and resets it for tests', () => {
+    getStore().setWorkspaceBootstrapStatus('ready');
+
+    expect(getStore().workspaceBootstrapStatus).toBe('ready');
+
+    resetWorkspaceSessionStoreForTests();
+
+    expect(getStore().workspaceBootstrapStatus).toBe('bootstrapping');
   });
 
   it('updates current project and high-level view state', () => {

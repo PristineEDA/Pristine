@@ -70,6 +70,7 @@ interface EditorAreaProps {
   tabs: EditorAreaTab[];
   activeTabId: string;
   hasOpenProject?: boolean;
+  workspaceBootstrapStatus?: 'bootstrapping' | 'ready';
   documentTabId?: string;
   onTabChange: (id: string) => void;
   onTabClose: (id: string) => void;
@@ -92,6 +93,8 @@ interface EditorAreaProps {
   onNewShortcut?: () => void;
   onCloseShortcut?: () => void;
   onSaveShortcut?: () => void;
+  onCreateProject?: () => void;
+  onOpenProject?: () => void;
   onContentChange?: (fileId: string, content: string) => void;
   onEditorMount?: (editor: any) => void;
   onNavigateToLocation?: (fileId: string, line: number, col: number) => void;
@@ -213,6 +216,7 @@ function EditorTab({
             className="fill-ide-text text-ide-text shrink-0 transition-opacity group-hover:opacity-0"
           />
           <button
+            type="button"
             data-testid={`editor-tab-close-${tab.id}`}
             className="absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100 hover:bg-ide-border"
             onClick={(e) => { e.stopPropagation(); onClose(); }}
@@ -226,6 +230,7 @@ function EditorTab({
       )}
       {!tab.modified && (
         <button
+          type="button"
           data-testid={`editor-tab-close-${tab.id}`}
           className={`shrink-0 p-0.5 rounded hover:bg-ide-border transition-opacity ${trailingControlClassName}`}
           onClick={(e) => { e.stopPropagation(); onClose(); }}
@@ -302,6 +307,7 @@ export function EditorArea({
   tabs,
   activeTabId,
   hasOpenProject = true,
+  workspaceBootstrapStatus = 'ready',
   documentTabId,
   onTabChange,
   onTabClose,
@@ -324,6 +330,8 @@ export function EditorArea({
   onNewShortcut,
   onCloseShortcut,
   onSaveShortcut,
+  onCreateProject,
+  onOpenProject,
   onContentChange,
   onEditorMount,
   onNavigateToLocation,
@@ -513,9 +521,23 @@ export function EditorArea({
   }, []);
 
   if (tabs.length === 0) {
+    if (workspaceBootstrapStatus === 'bootstrapping') {
+      return (
+        <div
+          data-testid="editor-workspace-restoring"
+          className="flex h-full w-full items-center justify-center bg-ide-editor-bg text-center text-ide-text-muted"
+        >
+          <div>
+            <p className="text-[14px] font-medium text-ide-text-muted">Restoring workspace...</p>
+            <p className="mt-1 text-[12px]">Preparing the last project session.</p>
+          </div>
+        </div>
+      );
+    }
+
     if (!hasOpenProject) {
       return (
-        <EmptyProject />
+        <EmptyProject onCreateProject={onCreateProject} onOpenProject={onOpenProject} />
       );
     }
 
@@ -553,6 +575,7 @@ export function EditorArea({
         <div className="flex-1" />
         <TooltipIconButton content="Split Editor Right">
           <button
+            type="button"
             data-testid="editor-split-right"
             aria-label="Split Editor Right"
             onClick={() => onSplitEditor?.('horizontal')}
@@ -563,6 +586,7 @@ export function EditorArea({
         </TooltipIconButton>
         <TooltipIconButton content="Split Editor Down">
           <button
+            type="button"
             data-testid="editor-split-down"
             aria-label="Split Editor Down"
             onClick={() => onSplitEditor?.('vertical')}
@@ -571,7 +595,7 @@ export function EditorArea({
             <Split size={14} className="rotate-90" />
           </button>
         </TooltipIconButton>
-        <button className="px-2 text-ide-text-muted hover:text-ide-text transition-colors shrink-0 cursor-pointer">
+        <button type="button" className="px-2 text-ide-text-muted hover:text-ide-text transition-colors shrink-0 cursor-pointer">
           <MoreHorizontal size={14} />
         </button>
       </div>

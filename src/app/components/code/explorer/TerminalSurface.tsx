@@ -10,17 +10,24 @@ import {
   resizeTerminalSession,
   subscribeTerminalSession,
   writeTerminalSession,
+  type TerminalProfile,
 } from './terminalSessionStore';
 
 interface TerminalSurfaceProps {
   layoutVersion?: string;
+  profile?: TerminalProfile;
   sessionKey?: string;
   testId?: string;
 }
 
 const DEFAULT_TERMINAL_SESSION_KEY = 'default';
 
-export function TerminalSurface({ layoutVersion, sessionKey = DEFAULT_TERMINAL_SESSION_KEY, testId = 'terminal-host' }: TerminalSurfaceProps) {
+export function TerminalSurface({
+  layoutVersion,
+  profile = 'default',
+  sessionKey = DEFAULT_TERMINAL_SESSION_KEY,
+  testId = 'terminal-host',
+}: TerminalSurfaceProps) {
   const [sessionState, setSessionState] = useState(() => getTerminalSessionSnapshot(sessionKey));
   const isE2E = window.electronAPI?.isE2E === true;
   const { activeTheme } = useTheme();
@@ -169,7 +176,7 @@ export function TerminalSurface({ layoutVersion, sessionKey = DEFAULT_TERMINAL_S
 
     scheduleSyncSize();
 
-    void ensureTerminalSession(sessionKey, { cols: term.cols, rows: term.rows }).then(() => {
+    void ensureTerminalSession(sessionKey, { cols: term.cols, profile, rows: term.rows }).then(() => {
       syncFromStore();
       scheduleSyncSize(true);
     });
@@ -184,7 +191,7 @@ export function TerminalSurface({ layoutVersion, sessionKey = DEFAULT_TERMINAL_S
       term.dispose();
       terminalRef.current = null;
     };
-  }, [cancelScheduledSyncSize, isE2E, scheduleSyncSize, sessionKey, terminalTheme]);
+  }, [cancelScheduledSyncSize, isE2E, profile, scheduleSyncSize, sessionKey, terminalTheme]);
 
   return (
     <div

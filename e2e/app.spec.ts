@@ -701,6 +701,16 @@ async function setNextProjectDirectoryPath(
   }, directoryPath);
 }
 
+async function setNextOpenProjectPath(
+  app: Awaited<ReturnType<typeof electron.launch>>,
+  projectPath: string,
+) {
+  await app.evaluate(({ app: electronApp }, nextProjectPath) => {
+    void electronApp;
+    process.env['PRISTINE_E2E_OPEN_PROJECT_PATH'] = nextProjectPath;
+  }, projectPath);
+}
+
 function createWorkspaceCopy(targetPath: string) {
   fs.rmSync(targetPath, { recursive: true, force: true });
   fs.cpSync(fixtureWorkspace, targetPath, { recursive: true });
@@ -749,6 +759,24 @@ function initializeGitWorkspaceCopy(targetPath: string, branchName: string) {
   fs.writeFileSync(path.join(targetPath, 'ignored.log'), 'ignored log\n', 'utf-8');
 }
 
+function isGitAvailable() {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'pipe', windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function initializeNestedGitRepository(targetPath: string, branchName: string) {
+  execFileSync('git', ['init'], { cwd: targetPath, stdio: 'pipe', windowsHide: true });
+  execFileSync('git', ['config', 'user.name', 'Pristine E2E'], { cwd: targetPath, stdio: 'pipe', windowsHide: true });
+  execFileSync('git', ['config', 'user.email', 'pristine-e2e@example.com'], { cwd: targetPath, stdio: 'pipe', windowsHide: true });
+  execFileSync('git', ['add', '.'], { cwd: targetPath, stdio: 'pipe', windowsHide: true });
+  execFileSync('git', ['commit', '-m', 'Initial nested fixture'], { cwd: targetPath, stdio: 'pipe', windowsHide: true });
+  execFileSync('git', ['branch', '-M', branchName], { cwd: targetPath, stdio: 'pipe', windowsHide: true });
+}
+
 function notifyAppWindowFocused(
   app: Awaited<ReturnType<typeof electron.launch>>,
 ) {
@@ -763,7 +791,10 @@ function notifyAppWindowFocused(
   });
 }
 
-async function launchAppForSplashHandoff() {
+async function launchAppForSplashHandoff(options?: { projectRoot?: string | null }) {
+  const projectRootEnv = options?.projectRoot === null
+    ? undefined
+    : options?.projectRoot ?? fixtureWorkspace;
   const userDataPath = getE2EUserDataPath();
   prepareE2EUserDataPath(userDataPath);
 
@@ -772,7 +803,7 @@ async function launchAppForSplashHandoff() {
     env: {
       ...process.env,
       PRISTINE_E2E: '1',
-      PRISTINE_PROJECT_ROOT: fixtureWorkspace,
+      ...(projectRootEnv ? { PRISTINE_PROJECT_ROOT: projectRootEnv } : {}),
       PRISTINE_USER_DATA_PATH: userDataPath,
     },
   });
@@ -845,6 +876,20 @@ async function ensureExplorerVisible(window: Awaited<ReturnType<typeof launchApp
     timeout: UI_READY_TIMEOUT_MS,
   }).toBeGreaterThan(100);
   await expect(readmeNode).toBeVisible();
+}
+
+async function ensureLeftPanelShellVisible(window: Awaited<ReturnType<typeof launchApp>>['window']) {
+  const leftPanel = window.getByTestId('panel-left-panel');
+  const leftPanelToggle = window.getByTestId('toggle-left-panel');
+
+  if (await leftPanelToggle.getAttribute('data-state') !== 'on') {
+    await leftPanelToggle.click();
+  }
+
+  await expect(leftPanel).toBeVisible();
+  await expect.poll(async () => (await leftPanel.boundingBox())?.width ?? 0, {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(100);
 }
 
 async function ensureExplorerHidden(window: Awaited<ReturnType<typeof launchApp>>['window']) {
@@ -2120,9 +2165,9 @@ test('splash window hands off to the main window after the startup delay', async
 
   const elapsedBeforeMidpointCheck = Date.now() - launchStartedAt;
   if (elapsedBeforeMidpointCheck < splashMidpointCheckMs) {
-    await expect.poll(() => Date.now() - launchStartedAt, {
-      timeout: splashMidpointCheckMs - elapsedBeforeMidpointCheck + 1000,
-    }).toBeGreaterThanOrEqual(splashMidpointCheckMs);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, splashMidpointCheckMs - elapsedBeforeMidpointCheck + 50);
+    });
 
     await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash')).toBe(true);
     await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(false);
@@ -2140,6 +2185,77 @@ test('splash window hands off to the main window after the startup delay', async
   await expect(window.getByTestId('activity-item-explorer')).toBeVisible();
 
   await app.close();
+});
+
+test('restored maximized project keeps the splash visible until the startup delay', async () => {
+  test.slow();
+
+  const selectedProjectPath = test.info().outputPath('maximized-project-splash-root');
+  const projectName = `maximized_splash_${Date.now()}`;
+  const createdProjectPath = path.join(selectedProjectPath, projectName);
+  fs.mkdirSync(selectedProjectPath, { recursive: true });
+
+  const firstLaunch = await launchApp({ projectRoot: null });
+
+  try {
+    await clearRememberedCloseBehavior(firstLaunch.window);
+    await selectMenuBarItem(firstLaunch.window, 'File', 'New Project');
+    await firstLaunch.window.getByTestId('create-project-name').fill(projectName);
+    await setNextProjectDirectoryPath(firstLaunch.app, selectedProjectPath);
+    await firstLaunch.window.getByTestId('create-project-browse').click();
+    await firstLaunch.window.getByTestId('create-project-submit').click();
+
+    await expect.poll(() => fs.existsSync(path.join(createdProjectPath, '.pristine', 'project.sqlite')), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBe(true);
+    await expect(firstLaunch.window.getByTestId('file-tree-node-root')).toContainText(projectName);
+
+    const browserWindow = await firstLaunch.app.browserWindow(firstLaunch.window);
+    await browserWindow.evaluate((window) => {
+      window.maximize();
+    });
+    await expect.poll(async () => browserWindow.evaluate((window) => window.isMaximized())).toBe(true);
+
+    const closePromise = firstLaunch.window.waitForEvent('close');
+    await requestWindowClose(firstLaunch.window);
+    await closePromise;
+    await expect.poll(() => firstLaunch.app.windows().length).toBe(0);
+  } catch (error) {
+    await firstLaunch.app.close().catch(() => undefined);
+    throw error;
+  }
+
+  const launchStartedAt = Date.now();
+  const splashMidpointCheckMs = 2000;
+  const { app, windowPromise } = await launchAppForSplashHandoff({ projectRoot: null });
+
+  try {
+    await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash')).toBe(true);
+    await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(false);
+
+    const elapsedBeforeMidpointCheck = Date.now() - launchStartedAt;
+    if (elapsedBeforeMidpointCheck < splashMidpointCheckMs) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, splashMidpointCheckMs - elapsedBeforeMidpointCheck + 50);
+      });
+
+      await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash')).toBe(true);
+      await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(false);
+    }
+
+    await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash'), {
+      timeout: 60000,
+    }).toBe(false);
+    const window = await windowPromise;
+
+    expect(Date.now() - launchStartedAt).toBeGreaterThanOrEqual(3000);
+    await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(true);
+    await expect(window.getByTestId('file-tree-node-root')).toContainText(projectName, {
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+  } finally {
+    await app.close();
+  }
 });
 
 test('packaged Windows app keeps the splash handoff working during startup', async () => {
@@ -3663,8 +3779,105 @@ test('New Project opens from File menu and Ctrl+Shift+N with project defaults', 
     }).toBe(true);
     await expect(window.getByTestId('file-tree-node-root')).toContainText(projectName);
     await expect(window.getByTestId('editor-empty-open-project')).toBeVisible();
+    await expect(window.getByTestId('activity-action-configure')).toBeEnabled();
   } finally {
     await app.close();
+  }
+});
+
+test('empty project actions create and open projects through shared project flows', async () => {
+  const selectedProjectPath = test.info().outputPath('empty-project-actions-root');
+  const projectName = `empty_actions_${Date.now()}`;
+  const createdProjectPath = path.join(selectedProjectPath, projectName);
+  fs.mkdirSync(selectedProjectPath, { recursive: true });
+
+  const { app, window } = await launchApp({ projectRoot: null });
+
+  try {
+    await expect(window.getByText('No Projects Yet')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await window.getByTestId('empty-project-create-project').click();
+    await expect(window.getByTestId('create-project-dialog')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+
+    await window.getByTestId('create-project-name').fill(projectName);
+    await setNextProjectDirectoryPath(app, selectedProjectPath);
+    await window.getByTestId('create-project-browse').click();
+    await window.getByTestId('create-project-submit').click();
+
+    await expect(window.getByTestId('create-project-dialog')).toHaveCount(0, { timeout: UI_READY_TIMEOUT_MS });
+    await expect.poll(() => fs.existsSync(path.join(createdProjectPath, '.pristine', 'project.sqlite')), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBe(true);
+    await expect(window.getByTestId('file-tree-node-root')).toContainText(projectName);
+
+    await selectMenuBarItem(window, 'File', 'Close Project');
+    await expect(window.getByText('No Projects Yet')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(window.getByTestId('file-tree-node-root')).toHaveCount(0);
+
+    await setNextOpenProjectPath(app, createdProjectPath);
+    await window.getByTestId('empty-project-open-project').click();
+
+    await expect(window.getByTestId('file-tree-node-root')).toContainText(projectName, {
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+    await expect(window.getByText('No Projects Yet')).toHaveCount(0);
+  } finally {
+    await app.close();
+  }
+});
+
+test('Configure Project updates metadata and restores it after relaunch', async () => {
+  const selectedProjectPath = test.info().outputPath('configure-project-root');
+  const projectName = `configure_project_${Date.now()}`;
+  const createdProjectPath = path.join(selectedProjectPath, projectName);
+  fs.mkdirSync(selectedProjectPath, { recursive: true });
+
+  const firstLaunch = await launchApp({ projectRoot: null });
+
+  try {
+    await expect(firstLaunch.window.getByTestId('activity-action-configure')).toBeDisabled();
+
+    await selectMenuBarItem(firstLaunch.window, 'File', 'New Project');
+    await firstLaunch.window.getByTestId('create-project-name').fill(projectName);
+    await setNextProjectDirectoryPath(firstLaunch.app, selectedProjectPath);
+    await firstLaunch.window.getByTestId('create-project-browse').click();
+    await firstLaunch.window.getByTestId('create-project-submit').click();
+
+    await expect.poll(() => fs.existsSync(path.join(createdProjectPath, '.pristine', 'project.sqlite')), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBe(true);
+    await expect(firstLaunch.window.getByTestId('activity-action-configure')).toBeEnabled();
+
+    await firstLaunch.window.getByTestId('activity-action-configure').click();
+    await expect(firstLaunch.window.getByTestId('configure-project-dialog')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(firstLaunch.window.getByTestId('configure-project-mode')).toContainText('rtl2gds');
+    await expect(firstLaunch.window.getByTestId('configure-project-process')).toContainText('ics55');
+    await expect(firstLaunch.window.getByTestId('configure-project-padframe')).toContainText('QFN32');
+
+    await firstLaunch.window.getByTestId('configure-project-process').click();
+    await firstLaunch.window.getByRole('option', { name: 'gf180' }).click();
+    await firstLaunch.window.getByTestId('configure-project-padframe').click();
+    await firstLaunch.window.getByRole('option', { name: 'QFN128' }).click();
+    await firstLaunch.window.getByTestId('configure-project-submit').click();
+    await expect(firstLaunch.window.getByTestId('configure-project-dialog')).toHaveCount(0, { timeout: UI_READY_TIMEOUT_MS });
+
+    await firstLaunch.window.getByTestId('activity-action-configure').click();
+    await expect(firstLaunch.window.getByTestId('configure-project-process')).toContainText('gf180');
+    await expect(firstLaunch.window.getByTestId('configure-project-padframe')).toContainText('QFN128');
+  } finally {
+    await firstLaunch.app.close();
+  }
+
+  const relaunched = await launchApp({ projectRoot: null });
+  try {
+    await expect(relaunched.window.getByTestId('file-tree-node-root')).toContainText(projectName, {
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+    await relaunched.window.getByTestId('activity-action-configure').click();
+    await expect(relaunched.window.getByTestId('configure-project-dialog')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId('configure-project-process')).toContainText('gf180');
+    await expect(relaunched.window.getByTestId('configure-project-padframe')).toContainText('QFN128');
+  } finally {
+    await relaunched.app.close();
   }
 });
 
@@ -3742,6 +3955,188 @@ test('Close Project clears the workspace and removes the last project root', asy
   }
 });
 
+test('project session restores window bounds and panel layout chrome', async () => {
+  const selectedProjectPath = test.info().outputPath('project-layout-session-root');
+  const projectName = `layout_session_${Date.now()}`;
+  const createdProjectPath = path.join(selectedProjectPath, projectName);
+  fs.mkdirSync(selectedProjectPath, { recursive: true });
+
+  const firstLaunch = await launchApp({ projectRoot: null });
+
+  try {
+    await clearRememberedCloseBehavior(firstLaunch.window);
+    await selectMenuBarItem(firstLaunch.window, 'File', 'New Project');
+    await firstLaunch.window.getByTestId('create-project-name').fill(projectName);
+    await setNextProjectDirectoryPath(firstLaunch.app, selectedProjectPath);
+    await firstLaunch.window.getByTestId('create-project-browse').click();
+    await firstLaunch.window.getByTestId('create-project-submit').click();
+
+    await expect.poll(() => fs.existsSync(path.join(createdProjectPath, '.pristine', 'project.sqlite')), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBe(true);
+    await expect(firstLaunch.window.getByTestId('file-tree-node-root')).toContainText(projectName);
+
+    const browserWindow = await firstLaunch.app.browserWindow(firstLaunch.window);
+    await browserWindow.evaluate((win) => {
+      win.unmaximize();
+      win.setBounds({ height: 760, width: 1180, x: 96, y: 84 });
+    });
+
+    await ensureLeftPanelShellVisible(firstLaunch.window);
+
+    const rightPanelToggle = firstLaunch.window.getByTestId('toggle-right-panel');
+    await expect(rightPanelToggle).toBeEnabled();
+    await rightPanelToggle.click();
+    await expect(firstLaunch.window.getByTestId('panel-right-panel')).toBeVisible();
+
+    await firstLaunch.window.getByTestId('left-panel-split-toggle').click();
+    await expect(firstLaunch.window.getByTestId('panel-left-panel-secondary')).toHaveAttribute('aria-hidden', 'false');
+    await firstLaunch.window.getByTestId('right-panel-split-toggle').click();
+    await expect(firstLaunch.window.getByTestId('panel-right-panel-secondary')).toHaveAttribute('aria-hidden', 'false');
+
+    await openBottomTerminal(firstLaunch.window);
+    await expect(firstLaunch.window.getByTestId('bottom-panel-split')).toBeEnabled();
+    await firstLaunch.window.getByTestId('bottom-panel-split').click();
+    await firstLaunch.window.getByTestId('bottom-panel-open-pane-bottom-pane-2').click();
+    await firstLaunch.window.getByTestId('bottom-panel-open-placeholder-b-bottom-pane-2').click();
+    await expect(firstLaunch.window.getByText('Placeholder B')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+
+    const closePromise = firstLaunch.window.waitForEvent('close');
+    await requestWindowClose(firstLaunch.window);
+    await closePromise;
+    await expect.poll(() => firstLaunch.app.windows().length).toBe(0);
+  } catch (error) {
+    await firstLaunch.app.close().catch(() => undefined);
+    throw error;
+  }
+
+  const relaunched = await launchApp({ projectRoot: null });
+  try {
+    await expect(relaunched.window.getByTestId('file-tree-node-root')).toContainText(projectName, {
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+
+    await expect.poll(async () => {
+      const bounds = await readBrowserWindowBounds(relaunched.app, relaunched.window);
+      return {
+        height: bounds.height,
+        width: bounds.width,
+      };
+    }, { timeout: UI_READY_TIMEOUT_MS }).toEqual({ height: 760, width: 1180 });
+
+    await ensureLeftPanelShellVisible(relaunched.window);
+    await expect(relaunched.window.getByTestId('panel-left-panel-secondary')).toHaveAttribute('aria-hidden', 'false', {
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+    await expect(relaunched.window.getByTestId('panel-right-panel')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId('panel-right-panel-secondary')).toHaveAttribute('aria-hidden', 'false', {
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+
+    await ensureBottomPanelOpen(relaunched.window);
+    await expect(relaunched.window.getByTestId('bottom-panel-pane-bottom-pane-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId('bottom-panel-pane-bottom-pane-2')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByText('Placeholder B')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  } finally {
+    await relaunched.app.close();
+  }
+});
+
+test('project session restores side panel chrome and explorer tree ui state', async () => {
+  test.slow();
+
+  const workspaceCopy = test.info().outputPath('project-ui-session-workspace');
+  createWorkspaceCopy(workspaceCopy);
+
+  const generatedDir = path.join(workspaceCopy, 'rtl', 'core');
+  fs.mkdirSync(generatedDir, { recursive: true });
+  for (let index = 0; index < 48; index += 1) {
+    const fileName = `zz_project_session_${String(index).padStart(2, '0')}.sv`;
+    fs.writeFileSync(path.join(generatedDir, fileName), `module ${fileName.replace(/\.sv$/, '')};\nendmodule\n`, 'utf-8');
+  }
+
+  const firstLaunch = await launchApp({ projectRoot: workspaceCopy });
+
+  try {
+    await ensureExplorerVisible(firstLaunch.window);
+    await firstLaunch.window.getByTestId('file-tree-node-rtl').click();
+    await firstLaunch.window.getByTestId('file-tree-node-rtl_core').click();
+    const selectedNodeTestId = toWorkspaceTreeTestId('rtl/core/zz_project_session_47.sv');
+    await expect(firstLaunch.window.getByTestId(selectedNodeTestId)).toBeAttached({ timeout: UI_READY_TIMEOUT_MS });
+    await expect.poll(async () => (await scrollExplorerTreeToBottom(firstLaunch.window)).scrollTop, {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBeGreaterThan(0);
+    await firstLaunch.window.getByTestId(selectedNodeTestId).click();
+
+    await firstLaunch.window.getByTestId('left-panel-split-toggle').click();
+    await expect(firstLaunch.window.getByTestId('panel-left-panel-secondary')).toHaveAttribute('aria-hidden', 'false');
+    await firstLaunch.window.getByTestId('left-panel-secondary-tab-libraries').click();
+    await expect(firstLaunch.window.getByTestId('left-panel-secondary-tab-libraries')).toHaveAttribute('data-state', 'on');
+
+    const rightPanelToggle = firstLaunch.window.getByTestId('toggle-right-panel');
+    if (await rightPanelToggle.getAttribute('data-state') !== 'on') {
+      await rightPanelToggle.click();
+    }
+    await expect(firstLaunch.window.getByTestId('panel-right-panel')).toBeVisible();
+    await firstLaunch.window.getByTestId('right-panel-tab-outline').click();
+    await expect(firstLaunch.window.getByTestId('right-panel-tab-outline')).toHaveAttribute('data-state', 'on');
+    await firstLaunch.window.getByTestId('right-panel-split-toggle').click();
+    await expect(firstLaunch.window.getByTestId('panel-right-panel-secondary')).toHaveAttribute('aria-hidden', 'false');
+    await firstLaunch.window.getByTestId('right-panel-secondary-tab-x-propagation').click();
+    await expect(firstLaunch.window.getByTestId('right-panel-secondary-tab-x-propagation')).toHaveAttribute('data-state', 'on');
+
+    await firstLaunch.window.getByTestId('activity-item-physical').click();
+    await expect(firstLaunch.window.getByTestId('code-view-physical')).toBeVisible();
+    await firstLaunch.window.getByTestId('physical-left-panel-tab-constraints').click();
+    await firstLaunch.window.getByTestId('physical-left-panel-split-toggle').click();
+    await firstLaunch.window.getByTestId('physical-right-panel-tab-checks').click();
+    await firstLaunch.window.getByTestId('physical-right-panel-split-toggle').click();
+    await firstLaunch.window.getByTestId('physical-bottom-panel-tab-console').click();
+
+    const closePromise = firstLaunch.window.waitForEvent('close');
+    await requestWindowClose(firstLaunch.window);
+    await closePromise;
+    await expect.poll(() => firstLaunch.app.windows().length).toBe(0);
+  } catch (error) {
+    await firstLaunch.app.close().catch(() => undefined);
+    throw error;
+  }
+
+  const relaunched = await launchApp({ projectRoot: workspaceCopy });
+  try {
+    await relaunched.window.getByTestId('activity-item-explorer').click();
+    await expect(relaunched.window.getByTestId('code-view-explorer')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await ensureExplorerVisible(relaunched.window);
+    await expect(relaunched.window.getByTestId('file-tree-node-rtl')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId('file-tree-node-rtl_core')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId(toWorkspaceTreeTestId('rtl/core/zz_project_session_47.sv'))).toBeVisible({
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+    await expect.poll(async () => (await readExplorerTreeScrollTop(relaunched.window)), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBeGreaterThan(0);
+    await expect(relaunched.window.getByTestId(toWorkspaceTreeTestId('rtl/core/zz_project_session_47.sv'))).toHaveAttribute(
+      'data-selected',
+      'true',
+    );
+    await expect(relaunched.window.getByTestId('panel-left-panel-secondary')).toHaveAttribute('aria-hidden', 'false');
+    await expect(relaunched.window.getByTestId('left-panel-secondary-tab-libraries')).toHaveAttribute('data-state', 'on');
+    await expect(relaunched.window.getByTestId('panel-right-panel')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId('right-panel-tab-outline')).toHaveAttribute('data-state', 'on');
+    await expect(relaunched.window.getByTestId('panel-right-panel-secondary')).toHaveAttribute('aria-hidden', 'false');
+    await expect(relaunched.window.getByTestId('right-panel-secondary-tab-x-propagation')).toHaveAttribute('data-state', 'on');
+
+    await relaunched.window.getByTestId('activity-item-physical').click();
+    await expect(relaunched.window.getByTestId('physical-left-panel-tab-constraints')).toHaveAttribute('data-state', 'on');
+    await expect(relaunched.window.getByTestId('physical-left-panel-lower-panel')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId('physical-right-panel-tab-checks')).toHaveAttribute('data-state', 'on');
+    await expect(relaunched.window.getByTestId('physical-right-panel-lower-panel')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(relaunched.window.getByTestId('physical-bottom-panel-tab-console')).toHaveAttribute('data-state', 'on');
+  } finally {
+    await relaunched.app.close();
+  }
+});
+
 test('File > Setting... opens the settings dialog and updates persisted options', async () => {
   const { app, window } = await launchApp();
 
@@ -3766,6 +4161,33 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-dialog')).toBeVisible();
   await expect(window.getByTestId('settings-nav-general')).toHaveAttribute('aria-current', 'page');
   await expect(window.getByTestId('settings-page-general')).toBeVisible();
+  await expect(window.getByTestId('settings-notification-duration-input')).toHaveValue('5');
+  await expect(window.getByTestId('settings-notification-duration-input')).toHaveAttribute('min', '1');
+  await expect(window.getByTestId('settings-notification-duration-input')).toHaveAttribute('max', '10');
+  await expect(window.getByTestId('settings-notification-duration-input')).toHaveAttribute('step', '1');
+  await expect(window.getByTestId('settings-progress-hide-completed-switch')).toHaveAttribute('data-state', 'checked');
+  await window.waitForTimeout(1000);
+  await expect.poll(async () => {
+    const layoutValueColor = await window
+      .getByTestId('settings-code-viewer-layout-combobox')
+      .evaluate((element) => {
+        const view = (element as any).ownerDocument?.defaultView;
+        return view?.getComputedStyle(element).color ?? '';
+      });
+    const notificationValueColor = await window
+      .getByTestId('settings-notification-duration-input')
+      .evaluate((element) => {
+        const view = (element as any).ownerDocument?.defaultView;
+        return view?.getComputedStyle(element).color ?? '';
+      });
+    return notificationValueColor === layoutValueColor;
+  }).toBe(true);
+  await window.getByTestId('settings-notification-duration-input').fill('1');
+  await expect.poll(async () => readConfigValue(window, 'notifications.dismissSeconds')).toBe(1);
+  await setSwitchChecked(window.getByTestId('settings-progress-hide-completed-switch'), false);
+  await expect.poll(async () => readConfigValue(window, 'progress.hideCompleted')).toBe(false);
+  await setSwitchChecked(window.getByTestId('settings-progress-hide-completed-switch'), true);
+  await expect.poll(async () => readConfigValue(window, 'progress.hideCompleted')).toBe(true);
 
   await openSettingsPage(window, 'appearance');
   await expect(window.getByTestId('settings-nav-appearance')).toHaveAttribute('aria-current', 'page');
@@ -3790,7 +4212,8 @@ test('settings dialog supports subpage navigation and global search', async () =
 
   await openSettingsPage(window, 'eda');
   await expect(window.getByTestId('settings-nav-eda')).toHaveAttribute('aria-current', 'page');
-  await expect(window.getByTestId('settings-eda-placeholder-description')).toHaveText('EDA tool settings will appear here.');
+  await expect(window.getByTestId('settings-eda-wsl-ubuntu-distro-combobox')).toBeVisible();
+  await expect(window.getByTestId('settings-eda-wsl-ubuntu-distro-combobox')).toHaveText('Ubuntu-22.04');
 
   await openSettingsPage(window, 'pdk');
   await expect(window.getByTestId('settings-nav-pdk')).toHaveAttribute('aria-current', 'page');
@@ -5308,6 +5731,44 @@ test('explorer shows the real git branch and git file decorations for tracked an
     await window.getByTestId('file-tree-node-rtl_core_reg_file_v').dblclick();
 
     await expect(window.getByTestId('editor-tab-title-rtl/core/reg_file.v')).toHaveClass(/text-ide-warning/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('explorer hides Pristine metadata folders and shows first-level child git decorations', async () => {
+  test.skip(!isGitAvailable(), 'git is required for nested repository decoration smoke coverage');
+  test.slow();
+
+  const workspaceCopy = test.info().outputPath('git-nested-status-workspace');
+  createWorkspaceCopy(workspaceCopy);
+  fs.mkdirSync(path.join(workspaceCopy, '.pristine'), { recursive: true });
+  fs.writeFileSync(path.join(workspaceCopy, '.pristine', 'project.sqlite'), '', 'utf-8');
+  fs.mkdirSync(path.join(workspaceCopy, '.prstine'), { recursive: true });
+  fs.writeFileSync(path.join(workspaceCopy, '.prstine', 'legacy.sqlite'), '', 'utf-8');
+  initializeGitWorkspaceCopy(workspaceCopy, 'e2e-root-git');
+
+  const childRepoRoot = path.join(workspaceCopy, 'child-ip');
+  fs.mkdirSync(path.join(childRepoRoot, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(childRepoRoot, 'src', 'child_core.sv'), 'module child_core;\nendmodule\n', 'utf-8');
+  initializeNestedGitRepository(childRepoRoot, 'e2e-child-git');
+  fs.appendFileSync(path.join(childRepoRoot, 'src', 'child_core.sv'), '\n// nested git modified fixture\n', 'utf-8');
+
+  const { app, window } = await launchApp({ projectRoot: workspaceCopy });
+
+  try {
+    await ensureExplorerVisible(window);
+
+    await expect(window.getByTestId('file-tree-node-_pristine')).toHaveCount(0);
+    await expect(window.getByTestId('file-tree-node-_prstine')).toHaveCount(0);
+    await expect(window.getByTestId('status-bar-branch-label')).toHaveText('e2e-root-git');
+
+    await expect(window.getByTestId('file-tree-git-indicator-modified-rtl')).toBeVisible();
+    await expect(window.getByTestId('file-tree-git-indicator-modified-child-ip')).toBeVisible();
+
+    await window.getByTestId('file-tree-node-child-ip').click();
+    await window.getByTestId('file-tree-node-child-ip_src').click();
+    await expect(window.getByTestId('file-tree-git-indicator-modified-child-ip_src_child_core_sv')).toBeVisible();
   } finally {
     await app.close();
   }
@@ -7270,22 +7731,151 @@ test('left panel split shows two stacked panels and keeps the explorer tree scro
   }
 });
 
-test('activity bar shows compile and run action buttons with local selection only', async () => {
+test('activity bar shows configure and run action buttons with local selection only', async () => {
   const { app, window } = await launchApp();
 
-  const compileButton = window.getByTestId('activity-action-compile');
+  const configureButton = window.getByTestId('activity-action-configure');
   const runButton = window.getByTestId('activity-action-run');
 
-  await expect(compileButton).toBeVisible();
+  await expect(configureButton).toBeVisible();
   await expect(runButton).toBeVisible();
   await expect(window.getByTestId('activity-action-debug-action')).toHaveCount(0);
 
-  await expect(compileButton).not.toHaveAttribute('aria-pressed', /.+/);
+  await expect(configureButton).not.toHaveAttribute('aria-pressed', /.+/);
   await expect(runButton).not.toHaveAttribute('aria-pressed', /.+/);
 
+  await app.close();
+});
+
+test('File notif triggers notification and progress demos', async () => {
+  const { app, window } = await launchApp();
+  await window.evaluate(async () => {
+    const browserGlobal = window as typeof window & {
+      electronAPI?: {
+        config: {
+          set: (key: string, value: unknown) => Promise<void>;
+        };
+      };
+    };
+
+    await browserGlobal.electronAPI?.config.set('notifications.dismissSeconds', 1);
+  });
+
+  await window.getByTestId('menu-settings-button').click();
+  await expect(window.getByTestId('settings-dialog')).toBeVisible();
+  await openSettingsPage(window, 'general');
+  await setSwitchChecked(window.getByTestId('settings-progress-hide-completed-switch'), false);
+  await window.getByTestId('settings-close-button').click();
+  await expect(window.getByTestId('settings-dialog')).toHaveCount(0);
+
+  await selectMenuBarItem(window, 'File', 'notif');
+  await expect(window.getByTestId('status-bar-progress-summary')).toBeVisible();
+  await expect(window.getByTestId('status-bar-progress-title')).toHaveText('Scanning RTL Sources');
+  await expect(window.getByTestId('status-bar-progress-value')).toHaveText(/\d+%/);
+
+  await window.getByTestId('status-bar-progress-summary').hover();
+  await expect(window.getByTestId('status-bar-progress-popover')).toBeVisible();
+  const progressCards = window.locator('article[data-testid^="status-bar-progress-card-"]');
+  await expect(progressCards).toHaveCount(6);
+  await expect(window.getByTestId('status-bar-progress-card-title-progress-session-6')).toHaveText('Synchronizing Waveform Data');
+  await expect(window.getByTestId('status-bar-progress-card-title-progress-session-1')).toHaveText('Scanning RTL Sources');
+  const latestProgressBox = await window.getByTestId('status-bar-progress-card-title-progress-session-6').boundingBox();
+  const oldestProgressBox = await window.getByTestId('status-bar-progress-card-title-progress-session-1').boundingBox();
+  expect(latestProgressBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(oldestProgressBox?.y ?? Number.NEGATIVE_INFINITY);
+
+  await selectMenuBarItem(window, 'File', 'notif');
+  await selectMenuBarItem(window, 'File', 'notif');
+
+  const notificationHistory = await window.evaluate(async () => {
+    const browserGlobal = window as typeof window & {
+      electronAPI?: {
+        notifications: {
+          getHistory: () => Promise<Array<{ actions?: Array<{ label: string }>; createdAt: number; expiresAt: number; level: string; variant: string }>>;
+        };
+      };
+    };
+
+    return browserGlobal.electronAPI?.notifications.getHistory() ?? [];
+  });
+  expect(notificationHistory?.[0]?.level).toBe('error');
+  expect(notificationHistory?.[0]?.variant).toBe('standard');
+  expect(notificationHistory?.[1]?.variant).toBe('actions');
+  expect(notificationHistory?.[1]?.actions?.map((action) => action.label)).toEqual(['Mark as Read', 'Delete']);
+  expect(notificationHistory?.[0]?.expiresAt - notificationHistory?.[0]?.createdAt).toBe(1000);
+
+  await window.getByTestId('status-bar-notifications').hover();
+  await expect(window.getByTestId('status-bar-notifications-popover')).toBeVisible();
+  const notificationCards = window.locator('[data-testid^="status-bar-notification-card-"]');
+  await expect(notificationCards).toHaveCount(3);
+  await expect(notificationCards.nth(0)).toHaveAttribute('data-testid', 'status-bar-notification-card-error');
+  await expect(notificationCards.nth(1)).toHaveAttribute('data-testid', 'status-bar-notification-card-warning');
+  await expect(notificationCards.nth(2)).toHaveAttribute('data-testid', 'status-bar-notification-card-info');
+  await expect(notificationCards.nth(1).getByRole('button', { name: 'Mark as Read' })).toBeVisible();
+  await expect(notificationCards.nth(1).getByRole('button', { name: 'Delete' })).toBeVisible();
+
+  await notificationCards.nth(1).getByRole('button', { name: 'Mark as Read' }).click();
+  await expect(notificationCards).toHaveCount(3);
+
+  await window.locator('[data-testid^="status-bar-notification-dismiss-"]').first().click();
+  await expect(notificationCards).toHaveCount(2);
+
+  await expect(window.getByTestId('status-bar-progress-title')).toHaveText('Done', { timeout: 20000 });
+  await expect(window.getByTestId('status-bar-progress-value')).toHaveText('100%');
+  await window.getByTestId('menu-settings-button').click();
+  await expect(window.getByTestId('settings-dialog')).toBeVisible();
+  await openSettingsPage(window, 'general');
+  await setSwitchChecked(window.getByTestId('settings-progress-hide-completed-switch'), true);
+  await window.getByTestId('settings-close-button').click();
+  await expect(window.getByTestId('status-bar-progress-summary')).toHaveCount(0);
+
+  await app.close();
+});
+
+test('activity bar Run starts and stops the mocked WSL development environment', async () => {
+  const { app, window } = await launchApp({ env: { PRISTINE_E2E_MOCK_WSL: '1' } });
+
+  const runButton = window.getByTestId('activity-action-run');
+  await expect(runButton).toBeEnabled({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(runButton).toHaveAttribute('aria-label', 'Run');
+
+  await openBottomTerminal(window);
+  await expect(window.getByTestId('terminal-host')).toHaveAttribute('data-terminal-pane-id', 'bottom-pane-1', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await writeTerminalCommand(window, 'echo PRISTINE_WSL_RESTORE_MARKER');
+  await expect.poll(async () => readTerminalText(window), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toContain('PRISTINE_WSL_RESTORE_MARKER');
+
   await runButton.click();
-  await expect(compileButton).not.toHaveAttribute('aria-pressed', /.+/);
-  await expect(runButton).not.toHaveAttribute('aria-pressed', /.+/);
+  await expect(runButton).toHaveAttribute('aria-label', 'Pause', { timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('panel-bottom-panel')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('bottom-panel-tab-terminal')).toHaveAttribute('data-state', 'on', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('terminal-host')).toHaveAttribute('data-terminal-pane-id', 'wsl-pristine-eda-env', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  await runButton.click();
+  await expect(runButton).toHaveAttribute('aria-label', 'Run', { timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('terminal-host')).toHaveAttribute('data-terminal-pane-id', 'bottom-pane-1', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect.poll(async () => readTerminalText(window), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toContain('PRISTINE_WSL_RESTORE_MARKER');
+
+  await app.close();
+});
+
+test('activity bar Run is disabled without a project', async () => {
+  const { app, window } = await launchApp({
+    env: { PRISTINE_E2E_MOCK_WSL: '1' },
+    projectRoot: null,
+  });
+
+  await expect(window.getByTestId('activity-action-run')).toBeDisabled();
 
   await app.close();
 });
@@ -7295,17 +7885,17 @@ test('menu bar activity trigger expands and preserves the activity bar state acr
 
   const trigger = window.getByTestId('toggle-activity-bar');
   const physicalButton = window.getByTestId('activity-item-physical');
-  const compileButton = window.getByTestId('activity-action-compile');
+  const configureButton = window.getByTestId('activity-action-configure');
   const runButton = window.getByTestId('activity-action-run');
 
   await expect(trigger).toBeVisible();
   await expect(physicalButton.getByText('Physical')).toBeVisible();
-  await expect(compileButton.getByText('Compile')).toHaveCount(0);
+  await expect(configureButton.getByText('Configure')).toHaveCount(0);
 
   await trigger.click();
 
   await expect(physicalButton.getByText('Physical')).toBeVisible();
-  await expect(compileButton.getByText('Compile')).toBeVisible();
+  await expect(configureButton.getByText('Configure')).toBeVisible();
   await expect(runButton.getByText('Run')).toBeVisible();
 
   await switchToWhiteboard(window);
@@ -7316,12 +7906,12 @@ test('menu bar activity trigger expands and preserves the activity bar state acr
   await window.getByLabel('Code').click();
   await expect(window.getByTestId('activity-item-explorer')).toBeVisible();
   await expect(physicalButton.getByText('Physical')).toBeVisible();
-  await expect(compileButton.getByText('Compile')).toBeVisible();
+  await expect(configureButton.getByText('Configure')).toBeVisible();
 
   await trigger.click();
 
   await expect(physicalButton.getByText('Physical')).toBeVisible();
-  await expect(compileButton.getByText('Compile')).toHaveCount(0);
+  await expect(configureButton.getByText('Configure')).toHaveCount(0);
   await expect(runButton.getByText('Run')).toHaveCount(0);
 
   await app.close();
@@ -7589,6 +8179,13 @@ test('terminal bottom panel supports split panes with independent terminal lifec
   expect(initialSecondBox).not.toBeNull();
   expect(initialFirstBox?.width ?? 0).toBeGreaterThan(300);
   expect(initialSecondBox?.width ?? 0).toBeGreaterThan(300);
+
+  await getBottomPanelTab(window, 'lsp').click();
+  await expect(window.getByTestId('bottom-panel-pane-bottom-pane-lsp-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('bottom-panel-pane-bottom-pane-2')).toHaveCount(0);
+
+  await getBottomPanelTab(window, 'terminal').click();
+  await expect(secondPane).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
 
   await window.waitForTimeout(350);
 

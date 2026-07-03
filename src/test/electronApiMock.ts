@@ -84,6 +84,7 @@ export function createElectronApiMock(): ElectronAPI {
     show: vi.fn(),
     hide: vi.fn(),
     close: vi.fn(),
+    markWorkspaceReady: vi.fn().mockResolvedValue(true),
     resolveCloseRequest: vi.fn(),
     setFloatingInfoWindowVisible: vi.fn(),
     setFloatingInfoWindowExpanded: vi.fn(),
@@ -156,6 +157,24 @@ export function createElectronApiMock(): ElectronAPI {
       kill: vi.fn().mockResolvedValue(true),
       onData: vi.fn(() => vi.fn()),
       onExit: vi.fn(() => vi.fn()),
+    },
+    wsl: {
+      startPristineEdaEnvironment: vi.fn().mockResolvedValue({
+        ok: true,
+        distroName: 'pristine-eda-env',
+        installed: true,
+        status: { distroName: 'pristine-eda-env', installed: true, state: 'running' },
+      }),
+      stopPristineEdaEnvironment: vi.fn().mockResolvedValue({
+        ok: true,
+        distroName: 'pristine-eda-env',
+        status: { distroName: 'pristine-eda-env', installed: true, state: 'stopped' },
+      }),
+      getPristineEdaEnvironmentStatus: vi.fn().mockResolvedValue({
+        distroName: 'pristine-eda-env',
+        installed: true,
+        state: 'stopped',
+      }),
     },
     lsp: {
       ensureInitialized: vi.fn().mockResolvedValue(undefined),
@@ -287,9 +306,31 @@ export function createElectronApiMock(): ElectronAPI {
     notices: {
       revealBundledFiles: vi.fn().mockResolvedValue(true),
     },
+    notifications: {
+      publish: vi.fn().mockImplementation(async (input) => ({
+        body: input.body ?? '',
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 5000,
+        id: 'notification-test-id',
+        level: input.level,
+        title: input.title,
+        variant: input.variant ?? 'standard',
+        ...(input.actions ? { actions: input.actions } : {}),
+      })),
+      dismiss: vi.fn().mockResolvedValue(undefined),
+      getHistory: vi.fn().mockResolvedValue([]),
+      onHistoryChanged: vi.fn(() => vi.fn()),
+    },
     project: {
       createProject: vi.fn().mockImplementation(async (input) => ({
         project: {
+          config: {
+            mode: input.mode,
+            process: input.process,
+            type: input.type,
+            mgnt: input.mgnt,
+            padframe: input.padframe,
+          },
           name: input.name,
           rootPath: `${input.path}\\${input.name}`,
           session: null,
@@ -297,6 +338,13 @@ export function createElectronApiMock(): ElectronAPI {
       })),
       openProject: vi.fn().mockResolvedValue({
         project: {
+          config: {
+            mode: 'rtl2gds',
+            process: 'ics55',
+            type: 'retroSoC',
+            mgnt: 'none',
+            padframe: 'QFN32',
+          },
           name: 'project',
           rootPath: 'C:\\Projects\\project',
           session: null,
@@ -305,6 +353,14 @@ export function createElectronApiMock(): ElectronAPI {
       closeProject: vi.fn().mockResolvedValue({ closed: true }),
       getCurrentProject: vi.fn().mockResolvedValue(null),
       flushSession: vi.fn().mockResolvedValue(undefined),
+      updateProjectConfig: vi.fn().mockImplementation(async (input) => ({
+        project: {
+          config: input,
+          name: 'project',
+          rootPath: 'C:\\Projects\\project',
+          session: null,
+        },
+      })),
       onProjectChanged: vi.fn(() => vi.fn()),
     },
     auth: {

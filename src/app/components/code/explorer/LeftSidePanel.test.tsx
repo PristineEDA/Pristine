@@ -8,6 +8,7 @@ import {
   type CodeViewerLayoutMode,
 } from '../../../context/CodeViewerLayoutContext';
 import { resetWorkspaceGitStatusStoreForTests } from '../../../git/workspaceGitStatus';
+import { resetExplorerTreeSessionStoreForTests, useExplorerTreeSessionStore } from '../../../workspace/useExplorerTreeSessionStore';
 import {
   getExplorerClipboardTarget,
   getExplorerDeleteTarget,
@@ -95,6 +96,7 @@ describe('LeftSidePanel', () => {
     testUser = userEvent.setup();
     resetWorkspaceGitStatusStoreForTests();
     resetSidePanelSessionStoreForTests();
+    resetExplorerTreeSessionStoreForTests();
 
     vi.mocked(electronApi.fs.exists).mockResolvedValue(true);
     vi.mocked(electronApi.fs.readDir).mockImplementation(async (dirPath: string) => {
@@ -272,6 +274,17 @@ describe('LeftSidePanel', () => {
     expect(await screen.findByTestId('left-panel-secondary-placeholder')).toHaveTextContent('Hierarchy is empty');
     expect(screen.queryByTestId('left-panel-libraries-placeholder')).not.toBeInTheDocument();
     expect(useSidePanelSessionStore.getState().leftSecondaryTab).toBe('hierarchy');
+  });
+
+  it('persists selected real explorer nodes for project session restore', async () => {
+    renderLeftSidePanel({}, { layoutMode: 'compact' });
+
+    await selectDefaultFile();
+
+    expect(useExplorerTreeSessionStore.getState().selectedNode).toEqual({
+      path: 'rtl/peripherals/uart_rx.v',
+      type: 'file',
+    });
   });
 
   it('does not render the legacy explorer toolbar buttons', async () => {

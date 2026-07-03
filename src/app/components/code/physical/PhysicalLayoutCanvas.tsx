@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Application, Buffer as PixiBuffer, Container, Graphics, Mesh, MeshGeometry, Text, Texture } from 'pixi.js';
 
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import type {
   LspLayoutCatalog,
   LspLayoutBounds,
@@ -180,10 +181,10 @@ export function PhysicalLayoutCanvas({
   const gdsReactSyncCountRef = useRef(0);
   const gdsIdleSnapshotMsRef = useRef(0);
   const gdsIdleSnapshotSkippedCountRef = useRef(0);
-  const gdsTileCacheRef = useRef(new PhysicalLayoutGdsTileLruCache());
+  const gdsTileCacheRef = useLazyRef(() => new PhysicalLayoutGdsTileLruCache());
   const gdsLatestRequestKeyRef = useRef('');
   const gdsLastGoodTileRef = useRef<LspLayoutTileGeometry | null>(null);
-  const gdsDisplayedTilesRef = useRef(new Map<string, PhysicalLayoutGdsDisplayedTile>());
+  const gdsDisplayedTilesRef = useLazyRef(() => new Map<string, PhysicalLayoutGdsDisplayedTile>());
   const gdsDisplayedViewportBboxRef = useRef<LspLayoutBounds | null>(null);
   const gdsSceneActiveRef = useRef(false);
   const gdsChromeLayerRef = useRef<Container | null>(null);
@@ -207,7 +208,7 @@ export function PhysicalLayoutCanvas({
   const gdsPrefetchTileCountRef = useRef(0);
   const gdsOverviewFallbackActiveRef = useRef(false);
   const gdsCurrentLodBandRef = useRef('');
-  const gdsObservedLodBandsRef = useRef(new Set<string>());
+  const gdsObservedLodBandsRef = useLazyRef(() => new Set<string>());
   const lastGdsTileApplyMsRef = useRef(0);
   const lastGdsTileBuildMsRef = useRef(0);
   const gdsTileDiagnosticsRef = useRef({

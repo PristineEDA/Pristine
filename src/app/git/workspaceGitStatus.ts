@@ -1,4 +1,5 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect } from 'react';
+import { create } from 'zustand';
 import type { WorkspaceGitPathState, WorkspaceGitStatusPayload } from '../../../types/workspace-git';
 import { normalizeWorkspacePath } from '../workspace/workspaceFiles';
 
@@ -15,17 +16,37 @@ const EMPTY_WORKSPACE_GIT_STATUS: WorkspaceGitStatusPayload = {
   pathStates: {},
 };
 
-let currentSnapshot: WorkspaceGitSnapshot = {
+let inFlightLoad: Promise<void> | null = null;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+interface WorkspaceGitStatusStoreState {
+  snapshot: WorkspaceGitSnapshot;
+}
+
+interface WorkspaceGitStatusStoreActions {
+  setSnapshot: (snapshot: WorkspaceGitSnapshot) => void;
+}
+
+type WorkspaceGitStatusStore = WorkspaceGitStatusStoreState & WorkspaceGitStatusStoreActions;
+
+const DEFAULT_WORKSPACE_GIT_SNAPSHOT: WorkspaceGitSnapshot = {
   ...EMPTY_WORKSPACE_GIT_STATUS,
   isLoading: false,
 };
 
-const listeners = new Set<() => void>();
-let inFlightLoad: Promise<void> | null = null;
-let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+const useWorkspaceGitStatusStore = create<WorkspaceGitStatusStore>((set) => ({
+  snapshot: DEFAULT_WORKSPACE_GIT_SNAPSHOT,
+  setSnapshot: (snapshot) => {
+    set({ snapshot });
+  },
+}));
 
-function emitChange() {
-  listeners.forEach((listener) => listener());
+function getWorkspaceGitSnapshot(): WorkspaceGitSnapshot {
+  return useWorkspaceGitStatusStore.getState().snapshot;
+}
+
+function setWorkspaceGitSnapshot(snapshot: WorkspaceGitSnapshot): void {
+  useWorkspaceGitStatusStore.getState().setSnapshot(snapshot);
 }
 
 function normalizePathStates(pathStates: Record<string, WorkspaceGitPathState>): Record<string, WorkspaceGitPathState> {
@@ -47,50 +68,40 @@ async function loadWorkspaceGitStatus(force = false): Promise<void> {
 
   const gitApi = window.electronAPI?.git;
   if (!gitApi) {
-    currentSnapshot = {
+    setWorkspaceGitSnapshot({
       ...EMPTY_WORKSPACE_GIT_STATUS,
       isLoading: false,
       pathStates: {},
-    };
-    emitChange();
+    });
     return;
   }
 
-  currentSnapshot = {
-    ...currentSnapshot,
+  setWorkspaceGitSnapshot({
+    ...getWorkspaceGitSnapshot(),
     isLoading: true,
-  };
-  emitChange();
+  });
 
   const nextLoad = gitApi.getStatus()
     .then((nextStatus) => {
-      currentSnapshot = {
+      setWorkspaceGitSnapshot({
         ...nextStatus,
         isLoading: false,
         pathStates: normalizePathStates(nextStatus.pathStates),
-      };
+      });
     })
     .catch(() => {
-      currentSnapshot = {
+      setWorkspaceGitSnapshot({
         ...EMPTY_WORKSPACE_GIT_STATUS,
         isLoading: false,
         pathStates: {},
-      };
+      });
     })
     .finally(() => {
       inFlightLoad = null;
-      emitChange();
     });
 
   inFlightLoad = nextLoad;
   return nextLoad;
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
 }
 
 export function getWorkspaceGitBranchLabel(snapshot: WorkspaceGitSnapshot): string {
@@ -124,25 +135,16 @@ export function refreshWorkspaceGitStatus() {
 }
 
 export function resetWorkspaceGitStatusStoreForTests() {
-  currentSnapshot = {
-    ...EMPTY_WORKSPACE_GIT_STATUS,
-    isLoading: false,
-    pathStates: {},
-  };
+  setWorkspaceGitSnapshot(DEFAULT_WORKSPACE_GIT_SNAPSHOT);
   inFlightLoad = null;
   if (refreshTimer) {
     clearTimeout(refreshTimer);
     refreshTimer = null;
   }
-  listeners.clear();
 }
 
 export function useWorkspaceGitStatus(): WorkspaceGitSnapshot {
-  const snapshot = useSyncExternalStore(
-    subscribe,
-    () => currentSnapshot,
-    () => currentSnapshot,
-  );
+  const snapshot = useWorkspaceGitStatusStore((state) => state.snapshot);
 
   useEffect(() => {
     void loadWorkspaceGitStatus();

@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { getEditorFontFamilyLabel } from '../../../editor/editorSettings';
+import { useProgressStore } from '../../../progress/useProgressStore';
 import {
   ensureEditorFontFamilyLoadedMock,
   importThemeMock,
@@ -190,7 +191,8 @@ describe('MenuBar settings', () => {
 
     await openSettingsPage(user, 'eda');
     expect(screen.getByTestId('settings-nav-eda')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByTestId('settings-eda-placeholder-description')).toHaveTextContent('EDA tool settings will appear here.');
+    expect(screen.getByTestId('settings-eda-wsl-ubuntu-distro-combobox')).toBeVisible();
+    expect(screen.getByTestId('settings-eda-wsl-ubuntu-distro-combobox')).toHaveTextContent('Ubuntu-22.04');
 
     await openSettingsPage(user, 'pdk');
     expect(screen.getByTestId('settings-nav-pdk')).toHaveAttribute('aria-current', 'page');
@@ -292,6 +294,8 @@ describe('MenuBar settings', () => {
       indentGuides: false,
       lineNumbers: 'relative',
       minimapEnabled: false,
+      notificationDismissSeconds: 7,
+      progressHideCompleted: false,
       renderControlCharacters: true,
       renderWhitespace: 'all',
       scrollBeyondLastLine: true,
@@ -306,6 +310,29 @@ describe('MenuBar settings', () => {
 
     expect(await screen.findByTestId('settings-dialog')).toBeVisible();
     expect(screen.getByTestId('settings-code-viewer-layout-combobox')).toHaveTextContent('Minimal');
+    expect(screen.getByTestId('settings-notification-duration-input-control')).toHaveClass(
+      'border-ide-border',
+      'bg-ide-tab-bg',
+      'text-ide-text',
+    );
+    expect(screen.getByTestId('settings-notification-duration-input-control')).not.toHaveClass('focus-within:border-ide-accent');
+    expect(screen.getByTestId('settings-notification-duration-input')).toHaveClass(
+      'bg-transparent',
+      'text-[var(--ide-text)]',
+      'placeholder:text-ide-text-muted',
+    );
+    expect(screen.getByTestId('settings-notification-duration-input')).toHaveStyle('color: var(--ide-text)');
+    expect(screen.getByTestId('settings-notification-duration-input')).toHaveValue(7);
+    expect(screen.getByTestId('settings-notification-duration-input')).toHaveAttribute('min', '1');
+    expect(screen.getByTestId('settings-notification-duration-input')).toHaveAttribute('max', '10');
+    expect(screen.getByTestId('settings-notification-duration-input')).toHaveAttribute('step', '1');
+    expect(screen.getByTestId('settings-progress-hide-completed-switch')).toHaveAttribute('data-state', 'unchecked');
+
+    fireEvent.change(screen.getByTestId('settings-notification-duration-input'), { target: { value: '9' } });
+    expect(screen.getByTestId('settings-notification-duration-input')).toHaveValue(9);
+    await user.click(screen.getByTestId('settings-progress-hide-completed-switch'));
+    expect(screen.getByTestId('settings-progress-hide-completed-switch')).toHaveAttribute('data-state', 'checked');
+    expect(useProgressStore.getState().hideCompleted).toBe(true);
 
     await openSettingsPage(user, 'appearance');
     expect(screen.getByTestId('settings-theme-combobox')).toHaveTextContent('Dark 2026');
@@ -397,6 +424,8 @@ describe('MenuBar settings', () => {
     expect(setThemeMock).toHaveBeenCalledWith('vscode-2026-light');
     expect(window.electronAPI?.config.set).toHaveBeenCalledWith('window.closeActionPreference', 'quit');
     expect(window.electronAPI?.config.set).toHaveBeenCalledWith('ui.floatingInfoWindow.visible', false);
+    expect(window.electronAPI?.config.set).toHaveBeenCalledWith('notifications.dismissSeconds', 9);
+    expect(window.electronAPI?.config.set).toHaveBeenCalledWith('progress.hideCompleted', true);
     expect(window.electronAPI?.setFloatingInfoWindowVisible).toHaveBeenCalledWith(false);
   }, SETTINGS_DIALOG_TEST_TIMEOUT_MS);
 

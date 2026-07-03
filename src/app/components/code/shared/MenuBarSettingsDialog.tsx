@@ -91,6 +91,8 @@ import { ScrollArea } from '../../ui/scroll-area';
 import { Slider } from '../../ui/slider';
 import { Switch } from '../../ui/switch';
 import { cn } from '@/lib/utils';
+import { setProgressHideCompleted } from '../../../progress/useProgressStore';
+import { parseWslUbuntuDistro, wslUbuntuDistroOptions, type WslUbuntuDistro } from '../../../../../types/wsl';
 import { EditorFontAdvancedDialog } from './EditorFontAdvancedDialog';
 import { EditorThemeAdvancedDialog } from './EditorThemeAdvancedDialog';
 import { ColorThemePreviewCard, EditorFontPreviewCard } from './PickerPreviewCards';
@@ -98,6 +100,12 @@ import { useSettingsDialogSessionStore, type SettingsPageId } from './useSetting
 
 const CLOSE_ACTION_CONFIG_KEY = 'window.closeActionPreference';
 const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
+const NOTIFICATION_DISMISS_SECONDS_CONFIG_KEY = 'notifications.dismissSeconds';
+const PROGRESS_HIDE_COMPLETED_CONFIG_KEY = 'progress.hideCompleted';
+export const EDA_WSL_UBUNTU_DISTRO_CONFIG_KEY = 'eda.wslUbuntuDistro';
+const DEFAULT_NOTIFICATION_DISMISS_SECONDS = 5;
+const MIN_NOTIFICATION_DISMISS_SECONDS = 1;
+const MAX_NOTIFICATION_DISMISS_SECONDS = 10;
 const THEME_PICKER_LAYOUT_MODE_CONFIG_KEY = 'workbench.themePickerLayoutMode';
 const settingsSectionClassName = 'overflow-hidden rounded-md border border-border/75 bg-background/35';
 const settingsSectionTitleClassName = 'text-[13px] font-medium';
@@ -195,10 +203,25 @@ const codeViewerLayoutModeOptions: Array<{
   },
 ];
 
+const wslUbuntuDistroSettingOptions: Array<{
+  value: WslUbuntuDistro;
+  label: string;
+  description: string;
+}> = wslUbuntuDistroOptions.map((value) => ({
+  value,
+  label: value,
+  description: value === 'Ubuntu-24.04'
+    ? 'Use Ubuntu 24.04 for the Pristine EDA WSL environment.'
+    : 'Use Ubuntu 22.04 for the Pristine EDA WSL environment.',
+}));
+
 export interface MenuBarSettingsState {
   codeViewerLayoutMode: CodeViewerLayoutMode;
   closeToTrayEnabled: boolean;
   floatingInfoWindowVisible: boolean;
+  notificationDismissSeconds: number;
+  progressHideCompleted: boolean;
+  wslUbuntuDistro: WslUbuntuDistro;
   themeId: string;
   themePickerLayoutMode: ThemePickerLayoutMode;
   editorCursorBlinking: ReturnType<typeof getConfiguredEditorCursorBlinking>;
@@ -232,6 +255,29 @@ function getConfiguredCloseAction(): 'quit' | 'tray' {
 
 function getFloatingInfoWindowVisible(): boolean {
   return window.electronAPI?.config.get(FLOATING_INFO_VISIBLE_CONFIG_KEY) === true;
+}
+
+function parseNotificationDismissSeconds(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_NOTIFICATION_DISMISS_SECONDS;
+  }
+
+  return Math.min(
+    MAX_NOTIFICATION_DISMISS_SECONDS,
+    Math.max(MIN_NOTIFICATION_DISMISS_SECONDS, Math.round(value)),
+  );
+}
+
+function getConfiguredNotificationDismissSeconds(): number {
+  return parseNotificationDismissSeconds(window.electronAPI?.config.get(NOTIFICATION_DISMISS_SECONDS_CONFIG_KEY));
+}
+
+function getConfiguredProgressHideCompleted(): boolean {
+  return window.electronAPI?.config.get(PROGRESS_HIDE_COMPLETED_CONFIG_KEY) !== false;
+}
+
+export function getConfiguredWslUbuntuDistro(): WslUbuntuDistro {
+  return parseWslUbuntuDistro(window.electronAPI?.config.get(EDA_WSL_UBUNTU_DISTRO_CONFIG_KEY));
 }
 
 function getConfiguredThemeId(): string {
@@ -360,6 +406,9 @@ function getPersistedSettingsState(): MenuBarSettingsState {
     codeViewerLayoutMode: getConfiguredCodeViewerLayoutMode(),
     closeToTrayEnabled: getConfiguredCloseAction() === 'tray',
     floatingInfoWindowVisible: getFloatingInfoWindowVisible(),
+    notificationDismissSeconds: getConfiguredNotificationDismissSeconds(),
+    progressHideCompleted: getConfiguredProgressHideCompleted(),
+    wslUbuntuDistro: getConfiguredWslUbuntuDistro(),
     themeId: getConfiguredThemeId(),
     themePickerLayoutMode: getConfiguredThemePickerLayoutMode(),
     editorCursorBlinking: getConfiguredEditorCursorBlinking(),
@@ -497,6 +546,62 @@ function SettingsSliderSection({
   );
 }
 
+function SettingsNumberSection({
+  description,
+  max,
+  min,
+  onValueChange,
+  step,
+  testId,
+  title,
+  unit,
+  value,
+}: {
+  description: string;
+  max: number;
+  min: number;
+  onValueChange: (value: number) => void;
+  step: number;
+  testId: string;
+  title: string;
+  unit: string;
+  value: number;
+}) {
+  return (
+    <div className={settingsSectionClassName}>
+      <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)] md:items-center">
+        <div className="min-w-0 space-y-1">
+          <p className={settingsSectionTitleClassName}>{title}</p>
+          <p className={settingsSectionDescriptionClassName} data-testid={`${testId}-description`}>
+            {description}
+          </p>
+        </div>
+        <label
+          className={cn(
+            'flex h-9 min-w-0 items-center gap-2 rounded-md border border-ide-border bg-ide-tab-bg px-3',
+            'text-ide-text',
+          )}
+          data-testid={`${testId}-control`}
+        >
+          <input
+            aria-label={title}
+            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] font-normal text-[var(--ide-text)] outline-none placeholder:text-ide-text-muted"
+            data-testid={testId}
+            max={max}
+            min={min}
+            onChange={(event) => onValueChange(Number(event.currentTarget.value))}
+            step={step}
+            style={{ color: 'var(--ide-text)' }}
+            type="number"
+            value={value}
+          />
+          <span className="shrink-0 text-[12px] font-medium text-ide-text-muted">{unit}</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function SettingsInfoSection({
   description,
   testId,
@@ -618,8 +723,6 @@ function getSettingsPlaceholderDescription(pageId: SettingsPageId) {
   switch (pageId) {
     case 'design':
       return 'Design settings will appear here.';
-    case 'eda':
-      return 'EDA tool settings will appear here.';
     case 'pdk':
       return 'PDK settings will appear here.';
     case 'agent':
@@ -743,6 +846,24 @@ export function useMenuBarSettingsController() {
     patchSettingsState({ floatingInfoWindowVisible: checked });
     void window.electronAPI?.config.set(FLOATING_INFO_VISIBLE_CONFIG_KEY, checked);
     void window.electronAPI?.setFloatingInfoWindowVisible(checked);
+  };
+
+  const handleNotificationDismissSecondsChange = (value: number) => {
+    const nextValue = parseNotificationDismissSeconds(value);
+    patchSettingsState({ notificationDismissSeconds: nextValue });
+    void window.electronAPI?.config.set(NOTIFICATION_DISMISS_SECONDS_CONFIG_KEY, nextValue);
+  };
+
+  const handleProgressHideCompletedChange = (checked: boolean) => {
+    patchSettingsState({ progressHideCompleted: checked });
+    setProgressHideCompleted(checked);
+    void window.electronAPI?.config.set(PROGRESS_HIDE_COMPLETED_CONFIG_KEY, checked);
+  };
+
+  const handleWslUbuntuDistroChange = (value: string) => {
+    const nextDistro = parseWslUbuntuDistro(value);
+    patchSettingsState({ wslUbuntuDistro: nextDistro });
+    void window.electronAPI?.config.set(EDA_WSL_UBUNTU_DISTRO_CONFIG_KEY, nextDistro);
   };
 
   const handleThemeChange = useCallback((value: string) => {
@@ -936,6 +1057,9 @@ export function useMenuBarSettingsController() {
     handleThemeImport,
     handleEditorWordWrapChange,
     handleFloatingInfoWindowVisibleChange,
+    handleNotificationDismissSecondsChange,
+    handleProgressHideCompletedChange,
+    handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
     handleSchematicGridSizeChange,
@@ -992,6 +1116,9 @@ export function MenuBarSettingsDialogs({
     handleThemeImport,
     handleEditorWordWrapChange,
     handleFloatingInfoWindowVisibleChange,
+    handleNotificationDismissSecondsChange,
+    handleProgressHideCompletedChange,
+    handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
     handleSchematicGridSizeChange,
@@ -1044,6 +1171,44 @@ export function MenuBarSettingsDialogs({
           emptyText="No code viewer layout found."
           testId="settings-code-viewer-layout-combobox"
         />
+      ),
+    },
+    {
+      id: 'notification-duration',
+      pageId: 'general',
+      title: 'Notification duration',
+      description: 'Choose how long native OS notifications stay open before Pristine asks the system to close them.',
+      keywords: ['notification', 'duration', 'timeout', 'system', 'os'],
+      element: (
+        <SettingsNumberSection
+          value={settingsState.notificationDismissSeconds}
+          onValueChange={handleNotificationDismissSecondsChange}
+          min={MIN_NOTIFICATION_DISMISS_SECONDS}
+          max={MAX_NOTIFICATION_DISMISS_SECONDS}
+          step={1}
+          unit="seconds"
+          title="Notification duration"
+          description="Choose how long native OS notifications stay open before Pristine asks the system to close them."
+          testId="settings-notification-duration-input"
+        />
+      ),
+    },
+    {
+      id: 'progress-hide-completed',
+      pageId: 'general',
+      title: 'Hide completed progress',
+      description: 'Hide the status bar progress widget after all active progress sessions finish.',
+      keywords: ['progress', 'status bar', 'complete', 'hide', 'done'],
+      element: (
+        <div className={settingsSectionClassName}>
+          <SettingsSwitchRow
+            checked={settingsState.progressHideCompleted}
+            description="Hide the status bar progress widget after all active progress sessions finish."
+            onCheckedChange={handleProgressHideCompletedChange}
+            testId="settings-progress-hide-completed-switch"
+            title="Hide completed progress"
+          />
+        </div>
       ),
     },
     {
@@ -1418,6 +1583,25 @@ export function MenuBarSettingsDialogs({
       ),
     },
     {
+      id: 'eda-wsl-ubuntu-distro',
+      pageId: 'eda',
+      title: 'WSL Ubuntu distribution',
+      description: 'Choose which Ubuntu release Pristine installs for the local EDA WSL environment.',
+      keywords: ['eda', 'wsl', 'ubuntu', 'linux', 'distribution'],
+      element: (
+        <SettingsComboboxSection
+          value={settingsState.wslUbuntuDistro}
+          onValueChange={handleWslUbuntuDistroChange}
+          options={wslUbuntuDistroSettingOptions}
+          title="WSL Ubuntu distribution"
+          description="Choose which Ubuntu release Pristine installs for the local EDA WSL environment."
+          searchPlaceholder="Search Ubuntu distributions..."
+          emptyText="No Ubuntu distribution found."
+          testId="settings-eda-wsl-ubuntu-distro-combobox"
+        />
+      ),
+    },
+    {
       id: 'close-to-tray',
       pageId: 'window',
       title: 'Close to tray',
@@ -1468,6 +1652,9 @@ export function MenuBarSettingsDialogs({
     handleEditorTabSizeChange,
     handleEditorWordWrapChange,
     handleFloatingInfoWindowVisibleChange,
+    handleNotificationDismissSecondsChange,
+    handleProgressHideCompletedChange,
+    handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
     handleSchematicGridSizeChange,

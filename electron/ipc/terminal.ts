@@ -12,6 +12,7 @@ import {
   assertString,
   validatePathWithinRoot,
 } from './validators.js';
+import { PRISTINE_WSL_DISTRO_NAME } from '../../types/wsl.js';
 
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 32;
@@ -25,6 +26,14 @@ let projectRoot: string | null = null;
 let macOSSpawnHelperPermissionsEnsured = false;
 
 const require = createRequire(import.meta.url);
+
+type TerminalProfile = 'default' | 'wsl-pristine-eda';
+
+interface TerminalLaunchConfig {
+  args: string[];
+  file: string;
+  label?: string;
+}
 
 function hasMissingProcessError(error: unknown): boolean {
   if (error && typeof error === 'object' && 'code' in error) {
@@ -109,13 +118,50 @@ export function setTerminalProjectRoot(root: string | null): void {
 export function getTerminalLaunchConfig(
   platform: NodeJS.Platform = process.platform,
   shellFromEnv = process.env['SHELL'],
-): { file: string; args: string[] } {
+  profile: TerminalProfile = 'default',
+  resolvedCwd?: string,
+): TerminalLaunchConfig {
+  if (profile === 'wsl-pristine-eda') {
+    if (process.env['PRISTINE_E2E_MOCK_WSL'] === '1') {
+      return platform === 'win32'
+        ? { file: 'powershell.exe', args: ['-NoLogo'], label: PRISTINE_WSL_DISTRO_NAME }
+        : { file: shellFromEnv?.trim() || '/bin/bash', args: ['-l'], label: PRISTINE_WSL_DISTRO_NAME };
+    }
+
+    if (platform !== 'win32') {
+      throw new Error('Pristine WSL terminal profile is only supported on Windows.');
+    }
+
+    return {
+      file: 'wsl.exe',
+      args: [
+        '--distribution',
+        PRISTINE_WSL_DISTRO_NAME,
+        '--cd',
+        resolvedCwd || projectRoot || '~',
+      ],
+      label: PRISTINE_WSL_DISTRO_NAME,
+    };
+  }
+
   if (platform === 'win32') {
     return { file: 'powershell.exe', args: ['-NoLogo'] };
   }
 
   const shellPath = shellFromEnv?.trim() || '/bin/bash';
   return { file: shellPath, args: ['-l'] };
+}
+
+function normalizeTerminalProfile(value: unknown): TerminalProfile {
+  if (value === undefined || value === null || value === 'default') {
+    return 'default';
+  }
+
+  if (value === 'wsl-pristine-eda') {
+    return 'wsl-pristine-eda';
+  }
+
+  throw new Error('Unsupported terminal profile.');
 }
 
 function getNodePtyPackageDirectory(): string | null {
@@ -291,6 +337,7 @@ export function registerTerminalHandlers(getMainWindow: () => BrowserWindow | nu
     const cwd = opts['cwd'];
     const cols = opts['cols'];
     const rows = opts['rows'];
+    const profile = normalizeTerminalProfile(opts['profile']);
 
     assertOptionalString(cwd, 'cwd');
     if (cols !== undefined) {
@@ -300,9 +347,9 @@ export function registerTerminalHandlers(getMainWindow: () => BrowserWindow | nu
       assertNumber(rows, 'rows');
     }
 
-    const launch = getTerminalLaunchConfig();
     const id = String(nextId++);
     const resolvedCwd = resolveSessionCwd(cwd);
+    const launch = getTerminalLaunchConfig(process.platform, process.env['SHELL'], profile, resolvedCwd);
     let session: pty.IPty;
 
     try {
@@ -334,7 +381,7 @@ export function registerTerminalHandlers(getMainWindow: () => BrowserWindow | nu
     return {
       id,
       pid: session.pid,
-      shell: path.basename(launch.file),
+      shell: launch.label ?? path.basename(launch.file),
     };
   });
 

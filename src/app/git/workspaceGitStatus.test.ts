@@ -39,6 +39,53 @@ describe('workspaceGitStatus', () => {
     expect(getWorkspaceGitPathState(result.current, './rtl/core/cpu_top.sv')).toBe('modified');
   });
 
+  it('keeps first-level child repository paths normalized in the shared git snapshot', async () => {
+    vi.mocked(window.electronAPI!.git.getStatus).mockResolvedValueOnce({
+      branchName: 'main',
+      hasProjectFiles: true,
+      isGitRepo: true,
+      pathStates: {
+        './ip/src/child_core.sv': 'modified',
+        'ip/generated/': 'created',
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceGitStatus());
+
+    await waitFor(() => {
+      expect(result.current.isGitRepo).toBe(true);
+    });
+
+    expect(result.current.pathStates).toEqual({
+      'ip/generated': 'created',
+      'ip/src/child_core.sv': 'modified',
+    });
+    expect(getWorkspaceGitPathState(result.current, 'ip/src/child_core.sv')).toBe('modified');
+  });
+
+  it('falls back to an empty Zustand-backed snapshot when the Electron bridge is unavailable', async () => {
+    const originalGitApi = window.electronAPI!.git;
+    window.electronAPI!.git = undefined as any;
+
+    try {
+      const { result } = renderHook(() => useWorkspaceGitStatus());
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current).toEqual({
+        branchName: null,
+        hasProjectFiles: false,
+        isGitRepo: false,
+        isLoading: false,
+        pathStates: {},
+      });
+    } finally {
+      window.electronAPI!.git = originalGitApi;
+    }
+  });
+
   it('falls back to git when the workspace has no visible project files or is not a git repository', () => {
     expect(getWorkspaceGitBranchLabel({
       branchName: 'feature/git-ui',

@@ -13,6 +13,11 @@ import { IconTabToggleGroup } from "./IconTabToggleGroup"
 
 type EmptyProjectTab = 'info' | 'image' | 'summary'
 
+interface EmptyProjectProps {
+  onCreateProject?: () => void
+  onOpenProject?: () => void
+}
+
 const emptyWallpaperPath = "./generated/empty-wallpaper.png"
 const emptyProjectTabs = [
   { value: 'info', label: 'Info', icon: InfoIcon, testId: 'empty-project-tab-info' },
@@ -20,7 +25,7 @@ const emptyProjectTabs = [
   { value: 'summary', label: 'Summary', icon: FileTextIcon, testId: 'empty-project-tab-summary' },
 ] as const
 
-function InfoContent() {
+function InfoContent({ onCreateProject, onOpenProject }: EmptyProjectProps) {
   return (
     <div data-testid="empty-project-info-panel" className="contents">
       <EmptyHeader>
@@ -33,8 +38,8 @@ function InfoContent() {
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent className="flex-row justify-center gap-2">
-        <Button>Create Project</Button>
-        <Button variant="outline">Open Project</Button>
+        <Button data-testid="empty-project-create-project" onClick={onCreateProject}>Create Project</Button>
+        <Button data-testid="empty-project-open-project" variant="outline" onClick={onOpenProject}>Open Project</Button>
       </EmptyContent>
       <Button
         variant="link"
@@ -42,7 +47,7 @@ function InfoContent() {
         className="text-ide-text-muted"
         size="sm"
       >
-        <a href="#">
+        <a href="https://github.com/maksyuki/pristine" target="_blank" rel="noreferrer">
           Learn More <ArrowUpRightIcon />
         </a>
       </Button>
@@ -88,7 +93,7 @@ function SummaryContent() {
   )
 }
 
-export function EmptyProject() {
+export function EmptyProject({ onCreateProject, onOpenProject }: EmptyProjectProps) {
   const [activeTab, setActiveTab] = useState<EmptyProjectTab>('info')
   const isImageTab = activeTab === 'image'
 
@@ -101,7 +106,7 @@ export function EmptyProject() {
       return <SummaryContent />
     }
 
-    return <InfoContent />
+    return <InfoContent onCreateProject={onCreateProject} onOpenProject={onOpenProject} />
   }
 
   return (

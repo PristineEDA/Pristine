@@ -93,7 +93,7 @@ export function ColorThemePreviewCard({
             </div>
             <div className="space-y-0.5 px-2 py-2" style={{ color: preview.foreground }}>
               <div className="truncate" data-testid={`${testIdPrefix}-line-comment-${option.value}`}>
-                <span style={{ color: preview.comment }}>// timing path</span>
+                <span style={{ color: preview.comment }}>{'// timing path'}</span>
               </div>
               <div className="truncate" data-testid={`${testIdPrefix}-line-module-${option.value}`}>
                 <span style={{ color: preview.pink }}>module</span>{' '}

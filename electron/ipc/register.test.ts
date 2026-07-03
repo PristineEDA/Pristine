@@ -15,9 +15,11 @@ const {
   mockSetShellProjectRoot,
   mockRegisterTerminalHandlers,
   mockSetTerminalProjectRoot,
+  mockRegisterWslHandlers,
   mockRegisterConfigHandlers,
   mockRegisterAuthHandlers,
   mockRegisterNoticeHandlers,
+  mockRegisterNotificationHandlers,
   mockRegisterPlatformHandler,
   mockRegisterProjectHandlers,
 } = vi.hoisted(() => ({
@@ -35,9 +37,11 @@ const {
   mockSetShellProjectRoot: vi.fn(),
   mockRegisterTerminalHandlers: vi.fn(),
   mockSetTerminalProjectRoot: vi.fn(),
+  mockRegisterWslHandlers: vi.fn(),
   mockRegisterConfigHandlers: vi.fn(),
   mockRegisterAuthHandlers: vi.fn(),
   mockRegisterNoticeHandlers: vi.fn(),
+  mockRegisterNotificationHandlers: vi.fn(),
   mockRegisterPlatformHandler: vi.fn(),
   mockRegisterProjectHandlers: vi.fn(),
 }));
@@ -77,6 +81,10 @@ vi.mock('./terminal.js', () => ({
   setTerminalProjectRoot: (root: string) => mockSetTerminalProjectRoot(root),
 }));
 
+vi.mock('./wsl.js', () => ({
+  registerWslHandlers: () => mockRegisterWslHandlers(),
+}));
+
 vi.mock('./config.js', () => ({
   registerConfigHandlers: () => mockRegisterConfigHandlers(),
 }));
@@ -87,6 +95,10 @@ vi.mock('./auth.js', () => ({
 
 vi.mock('./notices.js', () => ({
   registerNoticeHandlers: () => mockRegisterNoticeHandlers(),
+}));
+
+vi.mock('./notifications.js', () => ({
+  registerNotificationHandlers: (...args: unknown[]) => mockRegisterNotificationHandlers(...args),
 }));
 
 vi.mock('./platform.js', () => ({
@@ -121,6 +133,9 @@ describe('register helpers', () => {
     const setFloatingInfoWindowExpanded = vi.fn(() => false);
     const setFloatingInfoWindowMode = vi.fn(() => false);
     const resolveCloseRequest = vi.fn(() => false);
+    const getProjectWindowState = vi.fn(() => null);
+    const applyProjectWindowState = vi.fn();
+    const markWorkspaceReady = vi.fn();
 
     registerAllHandlers(
       getMainWindow,
@@ -128,6 +143,9 @@ describe('register helpers', () => {
       setFloatingInfoWindowExpanded,
       setFloatingInfoWindowMode,
       resolveCloseRequest,
+      getProjectWindowState,
+      applyProjectWindowState,
+      markWorkspaceReady,
     );
 
     expect(mockRegisterPlatformHandler).toHaveBeenCalledTimes(1);
@@ -138,16 +156,24 @@ describe('register helpers', () => {
       setFloatingInfoWindowExpanded,
       setFloatingInfoWindowMode,
       resolveCloseRequest,
+      markWorkspaceReady,
     );
     expect(mockRegisterFilesystemHandlers).toHaveBeenCalledTimes(1);
     expect(mockRegisterGitHandlers).toHaveBeenCalledTimes(1);
     expect(mockRegisterLspHandlers).toHaveBeenCalledWith(getMainWindow);
     expect(mockRegisterShellHandlers).toHaveBeenCalledWith(getMainWindow);
     expect(mockRegisterTerminalHandlers).toHaveBeenCalledWith(getMainWindow);
+    expect(mockRegisterWslHandlers).toHaveBeenCalledTimes(1);
     expect(mockRegisterConfigHandlers).toHaveBeenCalledTimes(1);
     expect(mockRegisterAuthHandlers).toHaveBeenCalledTimes(1);
     expect(mockRegisterNoticeHandlers).toHaveBeenCalledTimes(1);
-    expect(mockRegisterProjectHandlers).toHaveBeenCalledWith(getMainWindow, expect.any(Function));
+    expect(mockRegisterNotificationHandlers).toHaveBeenCalledWith(getMainWindow);
+    expect(mockRegisterProjectHandlers).toHaveBeenCalledWith(
+      getMainWindow,
+      expect.any(Function),
+      getProjectWindowState,
+      applyProjectWindowState,
+    );
   });
 
   it('re-exports setupWindowStreams', () => {

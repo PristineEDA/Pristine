@@ -1,5 +1,7 @@
 type TerminalApi = NonNullable<typeof window.electronAPI>['terminal'];
 
+export type TerminalProfile = 'default' | 'wsl-pristine-eda';
+
 export interface TerminalSessionSnapshot {
   buffer: string;
   error: string | null;
@@ -145,11 +147,11 @@ export function subscribeTerminalSession(sessionKeyOrListener: string | (() => v
   };
 }
 
-export async function ensureTerminalSession(options?: { cwd?: string; cols?: number; rows?: number }): Promise<void>;
-export async function ensureTerminalSession(sessionKey: string, options?: { cwd?: string; cols?: number; rows?: number }): Promise<void>;
+export async function ensureTerminalSession(options?: { cwd?: string; cols?: number; rows?: number; profile?: TerminalProfile }): Promise<void>;
+export async function ensureTerminalSession(sessionKey: string, options?: { cwd?: string; cols?: number; rows?: number; profile?: TerminalProfile }): Promise<void>;
 export async function ensureTerminalSession(
-  sessionKeyOrOptions?: string | { cwd?: string; cols?: number; rows?: number },
-  maybeOptions?: { cwd?: string; cols?: number; rows?: number },
+  sessionKeyOrOptions?: string | { cwd?: string; cols?: number; rows?: number; profile?: TerminalProfile },
+  maybeOptions?: { cwd?: string; cols?: number; rows?: number; profile?: TerminalProfile },
 ) {
   const sessionKey = typeof sessionKeyOrOptions === 'string' ? sessionKeyOrOptions : DEFAULT_SESSION_KEY;
   const options = typeof sessionKeyOrOptions === 'string' ? maybeOptions : sessionKeyOrOptions;

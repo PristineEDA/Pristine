@@ -1,14 +1,16 @@
 import { Suspense, lazy } from 'react';
+import type { TerminalProfile } from './terminalSessionStore';
 
 const TerminalSurface = lazy(() => import('./TerminalSurface').then((module) => ({ default: module.TerminalSurface })));
 
 interface TerminalPanelProps {
   layoutVersion?: string;
+  profile?: TerminalProfile;
   sessionKey?: string;
   testId?: string;
 }
 
-export function TerminalPanel({ layoutVersion, sessionKey, testId }: TerminalPanelProps) {
+export function TerminalPanel({ layoutVersion, profile, sessionKey, testId }: TerminalPanelProps) {
   return (
     <Suspense
       fallback={(
@@ -17,7 +19,7 @@ export function TerminalPanel({ layoutVersion, sessionKey, testId }: TerminalPan
         </div>
       )}
     >
-      <TerminalSurface layoutVersion={layoutVersion} sessionKey={sessionKey} testId={testId} />
+      <TerminalSurface layoutVersion={layoutVersion} profile={profile} sessionKey={sessionKey} testId={testId} />
     </Suspense>
   );
 }

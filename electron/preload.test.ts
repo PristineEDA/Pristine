@@ -75,12 +75,14 @@ describe('preload bridge', () => {
     const onLspDiagnostics = vi.fn();
     const onLspState = vi.fn();
     const onMenuCommand = vi.fn();
+    const onNotificationsHistoryChanged = vi.fn();
 
     api.minimize();
     api.maximize();
     api.show();
     api.hide();
     api.close();
+    api.markWorkspaceReady();
     api.resolveCloseRequest(3, 'proceed');
     api.setFloatingInfoWindowVisible(true);
     api.setFloatingInfoWindowExpanded(true);
@@ -88,6 +90,13 @@ describe('preload bridge', () => {
     api.gpu.getDiagnostics();
     api.dialog.showSaveDialog('untitled-1');
     api.dialog.showOpenProjectDirectoryDialog();
+    api.project.updateProjectConfig({
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      padframe: 'QFN32',
+      process: 'ics55',
+      type: 'retroSoC',
+    });
     api.fs.readFile('src/main.v', 'utf-8');
     api.fs.readFileAbsolute('C:/external/main.v', 'utf-8');
     api.fs.listFiles('rtl');
@@ -103,10 +112,13 @@ describe('preload bridge', () => {
     api.git.getStatus();
     api.shell.exec('make', ['lint'], { cwd: 'rtl' });
     api.shell.kill('shell-1');
-    api.terminal.create({ cwd: 'rtl', cols: 120, rows: 40 });
+    api.terminal.create({ cwd: 'rtl', cols: 120, rows: 40, profile: 'wsl-pristine-eda' });
     api.terminal.write('terminal-1', 'help');
     api.terminal.resize('terminal-1', 160, 50);
     api.terminal.kill('terminal-1');
+    api.wsl.startPristineEdaEnvironment({ ubuntuDistro: 'Ubuntu-24.04' });
+    api.wsl.stopPristineEdaEnvironment();
+    api.wsl.getPristineEdaEnvironmentStatus();
     api.lsp.ensureInitialized();
     api.lsp.openDocument('rtl/core/cpu_top.sv', 'systemverilog', 'module cpu_top; endmodule');
     api.lsp.changeDocument('rtl/core/cpu_top.sv', 'module cpu_top; logic a; endmodule');
@@ -163,6 +175,9 @@ describe('preload bridge', () => {
     api.lsp.layoutClose('layout-1');
     api.lsp.getDebugEvents();
     api.notices.revealBundledFiles();
+    api.notifications.publish({ level: 'info', title: 'Info notification', body: 'hello' });
+    api.notifications.dismiss('notification-1');
+    api.notifications.getHistory();
     api.auth.openAccountPage('login');
     api.auth.getSession();
     api.auth.signOut();
@@ -183,6 +198,7 @@ describe('preload bridge', () => {
     const disposeLspDiagnostics = api.lsp.onDiagnostics(onLspDiagnostics);
     const disposeLspState = api.lsp.onState(onLspState);
     const disposeMenuCommand = api.menu.onCommand(onMenuCommand);
+    const disposeNotificationsHistory = api.notifications.onHistoryChanged(onNotificationsHistoryChanged);
     const onAuthStateChanged = vi.fn();
     const onAuthError = vi.fn();
     const onConfigChange = vi.fn();
@@ -195,6 +211,7 @@ describe('preload bridge', () => {
     expect(mockInvoke).toHaveBeenCalledWith('async:window:show');
     expect(mockInvoke).toHaveBeenCalledWith('async:window:hide');
     expect(mockInvoke).toHaveBeenCalledWith('async:window:close');
+    expect(mockInvoke).toHaveBeenCalledWith('async:window:mark-workspace-ready');
     expect(mockInvoke).toHaveBeenCalledWith('async:window:resolve-close-request', 3, 'proceed');
     expect(mockInvoke).toHaveBeenCalledWith('async:window:set-floating-info-visibility', true);
     expect(mockInvoke).toHaveBeenCalledWith('async:window:set-floating-info-expanded', true);
@@ -202,6 +219,13 @@ describe('preload bridge', () => {
     expect(mockInvoke).toHaveBeenCalledWith('async:platform:get-gpu-diagnostics');
     expect(mockInvoke).toHaveBeenCalledWith('async:dialog:show-save', 'untitled-1');
     expect(mockInvoke).toHaveBeenCalledWith('async:dialog:show-open-project-directory');
+    expect(mockInvoke).toHaveBeenCalledWith('async:project:update-config', {
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      padframe: 'QFN32',
+      process: 'ics55',
+      type: 'retroSoC',
+    });
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:read-file', 'src/main.v', 'utf-8');
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:read-file-absolute', 'C:/external/main.v', 'utf-8');
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:list-files', 'rtl');
@@ -217,10 +241,13 @@ describe('preload bridge', () => {
     expect(mockInvoke).toHaveBeenCalledWith('async:git:get-status');
     expect(mockInvoke).toHaveBeenCalledWith('async:shell:exec', 'make', ['lint'], { cwd: 'rtl' });
     expect(mockInvoke).toHaveBeenCalledWith('async:shell:kill', 'shell-1');
-    expect(mockInvoke).toHaveBeenCalledWith('async:terminal:create', { cwd: 'rtl', cols: 120, rows: 40 });
+    expect(mockInvoke).toHaveBeenCalledWith('async:terminal:create', { cwd: 'rtl', cols: 120, rows: 40, profile: 'wsl-pristine-eda' });
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:write', 'terminal-1', 'help');
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:resize', 'terminal-1', 160, 50);
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:kill', 'terminal-1');
+    expect(mockInvoke).toHaveBeenCalledWith('async:wsl:start-pristine-eda-environment', { ubuntuDistro: 'Ubuntu-24.04' });
+    expect(mockInvoke).toHaveBeenCalledWith('async:wsl:stop-pristine-eda-environment');
+    expect(mockInvoke).toHaveBeenCalledWith('async:wsl:get-pristine-eda-environment-status');
     expect(mockInvoke).toHaveBeenCalledWith('async:lsp:ensure-initialized');
     expect(mockInvoke).toHaveBeenCalledWith('async:lsp:open-document', 'rtl/core/cpu_top.sv', 'systemverilog', 'module cpu_top; endmodule');
     expect(mockInvoke).toHaveBeenCalledWith('async:lsp:change-document', 'rtl/core/cpu_top.sv', 'module cpu_top; logic a; endmodule');
@@ -272,6 +299,9 @@ describe('preload bridge', () => {
     expect(mockInvoke).toHaveBeenCalledWith('async:lsp:layout-close', 'layout-1');
     expect(mockInvoke).toHaveBeenCalledWith('async:lsp:get-debug-events');
     expect(mockInvoke).toHaveBeenCalledWith('async:notices:reveal-bundled-files');
+    expect(mockInvoke).toHaveBeenCalledWith('async:notifications:publish', { level: 'info', title: 'Info notification', body: 'hello' });
+    expect(mockInvoke).toHaveBeenCalledWith('async:notifications:dismiss', 'notification-1');
+    expect(mockInvoke).toHaveBeenCalledWith('async:notifications:get-history');
     expect(mockInvoke).toHaveBeenCalledWith('async:auth:open-account-page', 'login');
     expect(mockInvoke).toHaveBeenCalledWith('async:auth:get-session');
     expect(mockInvoke).toHaveBeenCalledWith('async:auth:sign-out');
@@ -291,6 +321,7 @@ describe('preload bridge', () => {
     expect(mockOn).toHaveBeenCalledWith('stream:lsp:diagnostics', expect.any(Function));
     expect(mockOn).toHaveBeenCalledWith('stream:lsp:state', expect.any(Function));
     expect(mockOn).toHaveBeenCalledWith('stream:menu:command', expect.any(Function));
+    expect(mockOn).toHaveBeenCalledWith('stream:notifications:history-changed', expect.any(Function));
     expect(mockOn).toHaveBeenCalledWith('stream:auth:state-changed', expect.any(Function));
     expect(mockOn).toHaveBeenCalledWith('stream:auth:error', expect.any(Function));
     expect(mockOn).toHaveBeenCalledWith('stream:config:changed', expect.any(Function));
@@ -314,6 +345,12 @@ describe('preload bridge', () => {
     const workspaceChangeHandler = mockOn.mock.calls.find((call) => call[0] === 'stream:workspace:change')?.[1];
     workspaceChangeHandler({}, { refreshGitStatus: true, refreshWorkspaceTree: true });
     expect(onWorkspaceChange).toHaveBeenCalledWith({ refreshGitStatus: true, refreshWorkspaceTree: true });
+
+    const notificationsHandler = mockOn.mock.calls.find((call) => call[0] === 'stream:notifications:history-changed')?.[1];
+    notificationsHandler({}, [{ id: 'notification-1', level: 'info', title: 'Info', body: '', createdAt: 1, expiresAt: 2, variant: 'standard' }]);
+    expect(onNotificationsHistoryChanged).toHaveBeenCalledWith([
+      { id: 'notification-1', level: 'info', title: 'Info', body: '', createdAt: 1, expiresAt: 2, variant: 'standard' },
+    ]);
 
     const stdoutHandler = mockOn.mock.calls.find((call) => call[0] === 'stream:shell:stdout')?.[1];
     stdoutHandler({}, { id: 'shell-1', data: 'ok' });
@@ -377,6 +414,7 @@ describe('preload bridge', () => {
     disposeLspDiagnostics();
     disposeLspState();
     disposeMenuCommand();
+    disposeNotificationsHistory();
     disposeAuthState();
     disposeAuthError();
     disposeConfigChange();

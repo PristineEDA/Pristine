@@ -173,6 +173,7 @@ asarUnpack:
   - node_modules/node-pty/**
   - node_modules/better-sqlite3/**
 win:
+  icon: icon.ico
   target:
     - target: nsis
       arch: [x64]
@@ -183,6 +184,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   perMachine: false
 linux:
+  icon: icon.png
   target:
     - target: AppImage
       arch: [x64]
@@ -190,6 +192,7 @@ linux:
       arch: [x64]
   category: Development
 mac:
+  icon: icon.icns
   target:
     - target: dmg
       arch: [x64, arm64]

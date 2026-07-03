@@ -3,6 +3,7 @@ import { MenuBar } from './components/code/shared/MenuBar';
 import { DeleteConfirmationDialog } from './components/code/shared/DeleteConfirmationDialog';
 import { UnsavedChangesDialog } from './components/code/shared/UnsavedChangesDialog';
 import { ActivityBar } from './components/code/shared/ActivityBar';
+import { ConfigureProjectDialog } from './components/code/shared/ConfigureProjectDialog';
 import { LeftSidePanel } from './components/code/explorer/LeftSidePanel';
 import { EditorSplitLayout } from './components/code/shared/EditorSplitLayout';
 import { RightSidePanel } from './components/code/explorer/RightSidePanel';
@@ -58,10 +59,21 @@ import { CodeViewerLayoutProvider } from './context/CodeViewerLayoutContext';
 import { ModuleHierarchyProvider } from './context/ModuleHierarchyContext';
 import { SidebarProvider } from './components/ui/sidebar';
 import { refreshWorkspaceGitStatus } from './git/workspaceGitStatus';
+import { hydrateNotificationHistory, publishNotification } from './notifications/useNotificationStore';
+import { endProgressSession, startProgressSession, updateProgressSession } from './progress/useProgressStore';
 import { useGlobalAppShortcuts } from './useGlobalAppShortcuts';
 import { getPathBaseName } from './workspace/workspaceFiles';
 import { useQuickOpenController } from './useQuickOpenController';
 import { preloadDeferredMainContentViews } from './mainContentViewPreload';
+import { useProjectConfigureStore } from './components/code/shared/useProjectConfigureStore';
+import { useBottomPanelStore } from './components/code/explorer/useBottomPanelStore';
+import { getConfiguredWslUbuntuDistro } from './components/code/shared/MenuBarSettingsDialog';
+import { getTerminalSessionSnapshot, subscribeTerminalSession } from './components/code/explorer/terminalSessionStore';
+import {
+  WSL_TERMINAL_SESSION_KEY,
+  useWslDevelopmentEnvironmentStore,
+} from './wsl/useWslDevelopmentEnvironmentStore';
+import { stopWslDevelopmentEnvironmentAndRestore } from './wsl/wslDevelopmentEnvironmentLifecycle';
 
 const WorkflowView = lazy(() => import('./components/workflow/WorkflowView').then((module) => ({ default: module.WorkflowView })));
 const WhiteboardView = lazy(() => import('./components/whiteboard/WhiteboardView').then((module) => ({ default: module.WhiteboardView })));
@@ -100,6 +112,38 @@ const codeViewPlaceholderConfig = {
 
 type PlaceholderWorkspaceView = 'simulation' | 'synthesis';
 
+const demoNotifications = [
+  {
+    level: 'info',
+    title: 'Info notification',
+    body: 'Pristine notification info sample.',
+  },
+  {
+    level: 'warning',
+    title: 'Warning notification',
+    body: 'Pristine notification warning sample.',
+  },
+  {
+    level: 'error',
+    title: 'Error notification',
+    body: 'Pristine notification error sample.',
+  },
+] as const;
+
+const demoNotificationActions = [
+  { label: 'Mark as Read' },
+  { label: 'Delete' },
+] as const;
+
+const demoProgressSessions = [
+  { title: 'Scanning RTL Sources', source: 'Run', stepMs: 360, increment: 9, endDelayMs: 4200 },
+  { title: 'Indexing SystemVerilog Symbols', source: 'Run', stepMs: 440, increment: 11, endDelayMs: 5200 },
+  { title: 'Resolving Module Hierarchy', source: 'Run', stepMs: 320, increment: 7, endDelayMs: 6500 },
+  { title: 'Preparing Schematic Graph', source: 'Run', stepMs: 520, increment: 13, endDelayMs: 7800 },
+  { title: 'Checking Timing Reports', source: 'Run', stepMs: 610, increment: 15, endDelayMs: 9200 },
+  { title: 'Synchronizing Waveform Data', source: 'Run', stepMs: 390, increment: 6, endDelayMs: 10800 },
+] as const;
+
 // ─── AppLayout (consumes context) ────────────────────────────────────────────
 function AppLayout() {
   const {
@@ -109,6 +153,7 @@ function AppLayout() {
     showLeftPanel, setShowLeftPanel,
     showBottomPanel, setShowBottomPanel,
     showRightPanel, setShowRightPanel,
+    workspaceBootstrapStatus,
     workspaceTreeRefreshToken,
   } = useWorkspaceView();
   const {
@@ -168,6 +213,15 @@ function AppLayout() {
     createEmptyPhysicalLayoutVisibility()
   ));
   const physicalLayoutVisibilitySignatureRef = useRef('');
+  const notificationDemoIndexRef = useRef(0);
+  const progressDemoTimersRef = useRef<number[]>([]);
+  const wslTerminalHadSessionRef = useRef(false);
+  const wslStatus = useWslDevelopmentEnvironmentStore((state) => state.status);
+  const setWslStatus = useWslDevelopmentEnvironmentStore((state) => state.setWslDevelopmentEnvironmentStatus);
+  const setWslError = useWslDevelopmentEnvironmentStore((state) => state.setWslDevelopmentEnvironmentError);
+  const setWslUbuntuDistro = useWslDevelopmentEnvironmentStore((state) => state.setWslUbuntuDistro);
+  const focusedBottomPaneId = useBottomPanelStore((state) => state.focusedPaneId);
+  const showWslTerminalInPane = useBottomPanelStore((state) => state.showWslTerminalInPane);
   const [assistantThreadListExpanded, setAssistantThreadListExpanded] = useState(false);
   const explorerLeftPanelWidthPx = projectPanelWidths.explorerLeftPanel ?? EXPLORER_LEFT_PANEL_DEFAULT_WIDTH_PX;
   const explorerAssistantPanelWidthPx = projectPanelWidths.explorerRightPanel ?? EXPLORER_RIGHT_PANEL_DEFAULT_WIDTH_PX;
@@ -357,6 +411,15 @@ function AppLayout() {
   const handleActivityItemSelect = (nextView: string) => {
     setActiveView(nextView as typeof activeView);
   };
+  const openProjectConfigure = useProjectConfigureStore((state) => state.openProjectConfigure);
+
+  const handleProjectConfigure = useCallback(() => {
+    if (!currentProject) {
+      return;
+    }
+
+    openProjectConfigure(currentProject.config);
+  }, [currentProject, openProjectConfigure]);
 
   const restoreActiveEditorFocus = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -504,6 +567,150 @@ function AppLayout() {
     });
   }, []);
 
+  useEffect(() => {
+    const notificationsApi = window.electronAPI?.notifications;
+    if (!notificationsApi) {
+      return undefined;
+    }
+
+    let disposed = false;
+    void notificationsApi.getHistory().then((records) => {
+      if (!disposed) {
+        hydrateNotificationHistory(records);
+      }
+    });
+
+    const dispose = notificationsApi.onHistoryChanged((records) => {
+      hydrateNotificationHistory(records);
+    });
+
+    return () => {
+      disposed = true;
+      dispose();
+    };
+  }, []);
+
+  const handleNotificationProgressDemo = useCallback(() => {
+    const notificationDemoIndex = notificationDemoIndexRef.current;
+    const notification = demoNotifications[notificationDemoIndex % demoNotifications.length] ?? demoNotifications[0];
+    const variant = notificationDemoIndex % 2 === 0 ? 'standard' : 'actions';
+    notificationDemoIndexRef.current += 1;
+    void publishNotification({
+      ...notification,
+      actions: variant === 'actions' ? [...demoNotificationActions] : undefined,
+      variant,
+    });
+
+    demoProgressSessions.forEach((demo, index) => {
+      const id = startProgressSession({
+        title: demo.title,
+        source: demo.source,
+        value: 0,
+        message: `Mock progress ${index + 1} of ${demoProgressSessions.length}`,
+      });
+      let value = 0;
+      const intervalId = window.setInterval(() => {
+        value = Math.min(98, value + demo.increment);
+        updateProgressSession(id, { value });
+      }, demo.stepMs);
+      const timeoutId = window.setTimeout(() => {
+        window.clearInterval(intervalId);
+        updateProgressSession(id, { value: 100, message: 'Completed' });
+        endProgressSession(id);
+        progressDemoTimersRef.current = progressDemoTimersRef.current.filter((timerId) => timerId !== intervalId && timerId !== timeoutId);
+      }, demo.endDelayMs);
+
+      progressDemoTimersRef.current.push(intervalId, timeoutId);
+    });
+  }, []);
+
+  const publishWslErrorNotification = useCallback((body: string) => {
+    void publishNotification({
+      level: 'error',
+      title: 'WSL development environment failed',
+      body,
+    });
+  }, []);
+
+  const openWslTerminalPane = useCallback(() => {
+    setActiveView('explorer');
+    setShowBottomPanel(true);
+    showWslTerminalInPane(focusedBottomPaneId);
+  }, [focusedBottomPaneId, setActiveView, setShowBottomPanel, showWslTerminalInPane]);
+
+  const stopWslDevelopmentEnvironment = useCallback(async () => {
+    if (wslStatus === 'idle' || wslStatus === 'stopping') {
+      return;
+    }
+
+    await stopWslDevelopmentEnvironmentAndRestore({ notifyOnError: true });
+  }, [wslStatus]);
+
+  const handleRunWslDevelopmentEnvironment = useCallback(async () => {
+    if (!hasOpenProject || wslStatus === 'checking' || wslStatus === 'installing' || wslStatus === 'starting' || wslStatus === 'stopping') {
+      return;
+    }
+
+    if (wslStatus === 'running') {
+      await stopWslDevelopmentEnvironment();
+      return;
+    }
+
+    const ubuntuDistro = getConfiguredWslUbuntuDistro();
+    setWslUbuntuDistro(ubuntuDistro);
+    setWslStatus('checking');
+
+    try {
+      const result = await window.electronAPI?.wsl?.startPristineEdaEnvironment({ ubuntuDistro });
+
+      if (!result || !result.ok) {
+        const errorMessage = result?.error ?? 'Failed to start Pristine WSL development environment.';
+        setWslError(errorMessage);
+        publishWslErrorNotification(errorMessage);
+        return;
+      }
+
+      setWslStatus('starting');
+      openWslTerminalPane();
+      setWslStatus('running');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start Pristine WSL development environment.';
+      setWslError(errorMessage);
+      publishWslErrorNotification(errorMessage);
+    }
+  }, [
+    hasOpenProject,
+    openWslTerminalPane,
+    publishWslErrorNotification,
+    setWslError,
+    setWslStatus,
+    setWslUbuntuDistro,
+    stopWslDevelopmentEnvironment,
+    wslStatus,
+  ]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeTerminalSession(WSL_TERMINAL_SESSION_KEY, () => {
+      const snapshot = getTerminalSessionSnapshot(WSL_TERMINAL_SESSION_KEY);
+      const hadSession = wslTerminalHadSessionRef.current;
+      wslTerminalHadSessionRef.current = Boolean(snapshot.sessionId);
+
+      if (hadSession && !snapshot.sessionId && useWslDevelopmentEnvironmentStore.getState().status === 'running') {
+        void stopWslDevelopmentEnvironment();
+      }
+    });
+
+    return unsubscribe;
+  }, [stopWslDevelopmentEnvironment]);
+
+  useEffect(() => () => {
+    for (const timerId of progressDemoTimersRef.current) {
+      window.clearTimeout(timerId);
+      window.clearInterval(timerId);
+    }
+    progressDemoTimersRef.current = [];
+  }, []);
+
   const renderPanelPlaceholder = (title: string, testId: string) => (
     <PlaceholderView title={title} testId={testId} />
   );
@@ -511,7 +718,12 @@ function AppLayout() {
   const activityBar = (
     <ActivityBar
       activeView={activeView}
+      canConfigureProject={hasOpenProject}
+      canRunDevelopmentEnvironment={hasOpenProject && wslStatus !== 'checking' && wslStatus !== 'installing' && wslStatus !== 'starting' && wslStatus !== 'stopping'}
+      isDevelopmentEnvironmentActive={wslStatus !== 'idle' && wslStatus !== 'error'}
       onItemSelect={handleActivityItemSelect}
+      onProjectConfigure={handleProjectConfigure}
+      onRunAction={handleRunWslDevelopmentEnvironment}
     />
   );
 
@@ -644,6 +856,7 @@ function AppLayout() {
       topContent: (
         <EditorSplitLayout
           hasOpenProject={hasOpenProject}
+          workspaceBootstrapStatus={workspaceBootstrapStatus}
           jumpToLine={jumpToLine}
           onActiveFileReveal={handleEditorActiveFileReveal}
         />
@@ -789,7 +1002,12 @@ function AppLayout() {
       <div className="flex flex-1 overflow-hidden">
         <ActivityBar
           activeView={activeView}
+          canConfigureProject={hasOpenProject}
+          canRunDevelopmentEnvironment={hasOpenProject && wslStatus !== 'checking' && wslStatus !== 'installing' && wslStatus !== 'starting' && wslStatus !== 'stopping'}
+          isDevelopmentEnvironmentActive={wslStatus !== 'idle' && wslStatus !== 'error'}
           onItemSelect={handleActivityItemSelect}
+          onProjectConfigure={handleProjectConfigure}
+          onRunAction={handleRunWslDevelopmentEnvironment}
         />
         <div className="flex-1 min-h-0">
           <Suspense fallback={<MainContentFallback />}>
@@ -916,6 +1134,7 @@ function AppLayout() {
       className="flex h-screen min-h-0 flex-col bg-background text-foreground overflow-hidden"
     >
       <MenuBar
+        onNotificationProgressDemo={handleNotificationProgressDemo}
         showLeftPanel={showLeftPanel}
         showBottomPanel={showBottomPanel}
         showRightPanel={showRightPanel}
@@ -923,6 +1142,7 @@ function AppLayout() {
         onShowBottomPanelChange={setShowBottomPanel}
         onShowRightPanelChange={setShowRightPanel}
       />
+      <ConfigureProjectDialog currentProject={currentProject} />
       <UnsavedChangesDialog />
       <DeleteConfirmationDialog />
 

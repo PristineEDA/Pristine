@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, ChevronUp, Home, Maximize2, RotateCcw, Splin
 import { useModuleHierarchy } from '../../../../context/ModuleHierarchyContext';
 import { useSchematicSettings } from '../../../../context/SchematicSettingsContext';
 import { useTheme } from '../../../../context/ThemeContext';
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import { Button } from '../../../ui/button';
 import { TooltipIconButton } from '../../../ui/tooltip-icon-button';
 import { AsicSchematicCanvas, type AsicSchematicCanvasHandle } from './AsicSchematicCanvas';
@@ -22,8 +23,8 @@ export function AsicSchematicPanel() {
   const { top: hierarchyTop } = useModuleHierarchy();
   const schematicSettings = useSchematicSettings();
   const canvasRef = useRef<AsicSchematicCanvasHandle | null>(null);
-  const layoutCacheRef = useRef<Map<string, SchematicLayoutResult>>(new Map());
-  const prefetchingModuleIdsRef = useRef<Set<string>>(new Set());
+  const layoutCacheRef = useLazyRef(() => new Map<string, SchematicLayoutResult>());
+  const prefetchingModuleIdsRef = useLazyRef(() => new Set<string>());
   const graphRef = useRef<AsicSchematicGraph | null>(null);
   const [graph, setGraph] = useState<AsicSchematicGraph | null>(null);
   const [moduleId, setModuleId] = useState<string | null>(null);

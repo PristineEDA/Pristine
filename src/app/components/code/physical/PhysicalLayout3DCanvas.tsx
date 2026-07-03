@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import type {
   LspLayoutBounds,
   LspLayoutCatalog,
@@ -72,7 +73,7 @@ export function PhysicalLayout3DCanvas({
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const orbitGroupRef = useRef<THREE.Group | null>(null);
   const contentGroupRef = useRef<THREE.Group | null>(null);
-  const raycasterRef = useRef(new THREE.Raycaster());
+  const raycasterRef = useLazyRef(() => new THREE.Raycaster());
   const viewHelperRef = useRef<ReturnType<typeof createPhysicalLayout3DViewHelper> | null>(null);
   const lastViewHelperAxisRef = useRef<PhysicalLayout3DViewHelperAxis | ''>('');
   const viewHelperAnimationRef = useRef<{

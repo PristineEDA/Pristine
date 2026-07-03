@@ -14,15 +14,21 @@ import {
   commandSearchInputForegroundStyle,
   commandSearchInputWrapperClassName,
 } from '../../ui/command';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { Separator } from '../../ui/separator';
 import { cn } from '../../../../lib/utils';
+import {
+  defaultProjectConfigDraft,
+  ProjectConfigForm,
+  type ProjectConfigDraft,
+} from './ProjectConfigForm';
 
-export const projectModeOptions = ['rtl2gds', 'rtl'] as const;
-export const projectProcessOptions = ['ics55', 'ihp130', 'sky130', 'gf180'] as const;
-export const projectTypeOptions = ['retroSoC', 'ysyxSoC', 'Custom'] as const;
-export const projectManagementOptions = ['none', 'item1', 'item2'] as const;
-export const projectPadframeOptions = ['QFN32', 'QFN64', 'QFN88', 'QFN128'] as const;
+export {
+  projectManagementOptions,
+  projectModeOptions,
+  projectPadframeOptions,
+  projectProcessOptions,
+  projectTypeOptions,
+} from './ProjectConfigForm';
 
 const projectInputWrapperClassName = cn(
   commandSearchInputWrapperClassName,
@@ -36,49 +42,10 @@ interface CreateProjectDialogProps {
   dialogStyle?: CSSProperties;
 }
 
-interface ProjectSelectFieldProps {
-  label: string;
-  value: string;
-  options: readonly string[];
-  testId: string;
-  onValueChange: (value: string) => void;
-}
-
-function ProjectSelectField({ label, value, options, testId, onValueChange }: ProjectSelectFieldProps) {
-  return (
-    <div className="grid gap-1.5">
-      <label htmlFor={testId} className="text-[11px] font-medium uppercase tracking-[0.08em] text-ide-text-muted">
-        {label}
-      </label>
-      <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger
-          id={testId}
-          data-testid={testId}
-          className="h-8 w-full border-ide-border bg-ide-tab-bg text-[12px] text-ide-text shadow-none"
-          size="sm"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="border-ide-border bg-ide-bg text-ide-text">
-          {options.map((option) => (
-            <SelectItem key={option} value={option} className="text-[12px]">
-              {option}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
 export function CreateProjectDialog({ open, onOpenChange, dialogStyle }: CreateProjectDialogProps) {
   const [name, setName] = useState('');
   const [projectPath, setProjectPath] = useState('');
-  const [mode, setMode] = useState<(typeof projectModeOptions)[number]>('rtl2gds');
-  const [process, setProcess] = useState<(typeof projectProcessOptions)[number]>('ics55');
-  const [type, setType] = useState<(typeof projectTypeOptions)[number]>('retroSoC');
-  const [mgnt, setMgnt] = useState<(typeof projectManagementOptions)[number]>('none');
-  const [padframe, setPadframe] = useState<(typeof projectPadframeOptions)[number]>('QFN32');
+  const [configDraft, setConfigDraft] = useState<ProjectConfigDraft>(defaultProjectConfigDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -104,11 +71,7 @@ export function CreateProjectDialog({ open, onOpenChange, dialogStyle }: CreateP
       await projectApi.createProject({
         name,
         path: projectPath,
-        mode,
-        process,
-        type,
-        mgnt,
-        padframe,
+        ...configDraft,
       });
       onOpenChange(false);
     } catch (error: unknown) {
@@ -192,40 +155,10 @@ export function CreateProjectDialog({ open, onOpenChange, dialogStyle }: CreateP
             </div>
           </div>
 
-          <ProjectSelectField
-            label="mode"
-            value={mode}
-            options={projectModeOptions}
-            testId="create-project-mode"
-            onValueChange={(value) => setMode(value as typeof mode)}
-          />
-          <ProjectSelectField
-            label="process"
-            value={process}
-            options={projectProcessOptions}
-            testId="create-project-process"
-            onValueChange={(value) => setProcess(value as typeof process)}
-          />
-          <ProjectSelectField
-            label="type"
-            value={type}
-            options={projectTypeOptions}
-            testId="create-project-type"
-            onValueChange={(value) => setType(value as typeof type)}
-          />
-          <ProjectSelectField
-            label="mgnt"
-            value={mgnt}
-            options={projectManagementOptions}
-            testId="create-project-mgnt"
-            onValueChange={(value) => setMgnt(value as typeof mgnt)}
-          />
-          <ProjectSelectField
-            label="padframe"
-            value={padframe}
-            options={projectPadframeOptions}
-            testId="create-project-padframe"
-            onValueChange={(value) => setPadframe(value as typeof padframe)}
+          <ProjectConfigForm
+            draft={configDraft}
+            testIdPrefix="create-project"
+            onDraftChange={setConfigDraft}
           />
           {errorMessage && (
             <p

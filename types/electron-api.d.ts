@@ -49,6 +49,8 @@ import type { WindowCloseDecision, WindowCloseRequest } from '../src/app/window/
 import type { FloatingInfoWindowMode } from '../src/app/window/floatingInfoWindow';
 import type { AuthView, DesktopAuthSession } from '../src/app/auth/types';
 import type { ElectronGpuDiagnostics } from './electron-gpu';
+import type { NotificationPublishInput, NotificationRecord } from './notification';
+import type { WslEnvironmentStatus, WslStartInput, WslStartResult, WslStopResult } from './wsl';
 import type {
   CreateProjectInput,
   ProjectChangedEvent,
@@ -57,6 +59,8 @@ import type {
   ProjectOpenResult,
   ProjectSessionSnapshot,
   ProjectState,
+  ProjectUpdateConfigInput,
+  ProjectUpdateConfigResult,
 } from './project';
 
 export interface ElectronAPI {
@@ -75,6 +79,7 @@ export interface ElectronAPI {
   show: () => Promise<void>;
   hide: () => Promise<void>;
   close: () => Promise<void>;
+  markWorkspaceReady: () => Promise<boolean>;
   resolveCloseRequest: (requestId: number, decision: WindowCloseDecision) => Promise<boolean>;
   setFloatingInfoWindowVisible: (visible: boolean) => Promise<boolean>;
   setFloatingInfoWindowExpanded: (expanded: boolean) => Promise<boolean>;
@@ -131,6 +136,7 @@ export interface ElectronAPI {
     closeProject: (snapshot?: ProjectSessionSnapshot) => Promise<ProjectCloseResult>;
     getCurrentProject: () => Promise<ProjectState | null>;
     flushSession: (snapshot: ProjectSessionSnapshot) => Promise<void>;
+    updateProjectConfig: (input: ProjectUpdateConfigInput) => Promise<ProjectUpdateConfigResult>;
     onProjectChanged: (callback: (payload: ProjectChangedEvent) => void) => () => void;
   };
 
@@ -152,7 +158,7 @@ export interface ElectronAPI {
   };
 
   terminal: {
-    create: (options?: { cwd?: string; cols?: number; rows?: number }) => Promise<{
+    create: (options?: { cwd?: string; cols?: number; rows?: number; profile?: 'default' | 'wsl-pristine-eda' }) => Promise<{
       id: string;
       pid: number;
       shell: string;
@@ -162,6 +168,12 @@ export interface ElectronAPI {
     kill: (id: string) => Promise<boolean>;
     onData: (callback: (data: { id: string; data: string }) => void) => () => void;
     onExit: (callback: (data: { id: string; exitCode: number; signal: number }) => void) => () => void;
+  };
+
+  wsl: {
+    startPristineEdaEnvironment: (input: WslStartInput) => Promise<WslStartResult>;
+    stopPristineEdaEnvironment: () => Promise<WslStopResult>;
+    getPristineEdaEnvironmentStatus: () => Promise<WslEnvironmentStatus>;
   };
 
   lsp: {
@@ -234,6 +246,13 @@ export interface ElectronAPI {
 
   notices: {
     revealBundledFiles: () => Promise<boolean>;
+  };
+
+  notifications: {
+    publish: (input: NotificationPublishInput) => Promise<NotificationRecord>;
+    dismiss: (id: string) => Promise<void>;
+    getHistory: () => Promise<NotificationRecord[]>;
+    onHistoryChanged: (callback: (records: NotificationRecord[]) => void) => () => void;
   };
 
   auth: {

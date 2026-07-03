@@ -136,14 +136,16 @@ const defaultComponents = {
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
+  a: ({ className, children, ...props }) => (
     <a
       className={cn(
         "aui-md-a text-primary underline underline-offset-2 hover:text-primary/80",
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+    </a>
   ),
   blockquote: ({ className, ...props }) => (
     <blockquote

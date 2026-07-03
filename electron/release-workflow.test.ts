@@ -10,6 +10,8 @@ const releaseScriptPath = path.join(repoRoot, 'scripts', 'release-version.mjs')
 const workflowPath = path.join(repoRoot, '.github', 'workflows', 'ci.yml')
 const prepareEngineScriptPath = path.join(repoRoot, 'scripts', 'prepare-pristine-engine.mjs')
 const engineRemoteSourceHelperPath = path.join(repoRoot, 'scripts', 'pristine-engine-remote-source.mjs')
+const electronBuilderConfigPath = path.join(repoRoot, 'electron-builder.yml')
+const preparePackageAppScriptPath = path.join(repoRoot, 'scripts', 'prepare-package-app.mjs')
 const hookPath = path.join(repoRoot, '.githooks', 'pre-commit')
 
 function createPackageFixture(rootVersion = '0.0.1') {
@@ -306,5 +308,18 @@ describe('release workflow contract', () => {
     expect(workflow).toContain('release/**/*.yml')
     expect(workflow).toContain('!release/**/*-unpacked/**')
     expect(workflow).toContain("target=\"release-assets/${artifact_name}-${file_name}\"")
+  })
+
+  it('uses generated Pristine logo assets for packaged Windows, Linux, and macOS icons', () => {
+    const electronBuilderConfig = fs.readFileSync(electronBuilderConfigPath, 'utf8')
+    const preparePackageAppScript = fs.readFileSync(preparePackageAppScriptPath, 'utf8')
+
+    expect(electronBuilderConfig).toMatch(/win:\r?\n  icon: icon\.ico/)
+    expect(electronBuilderConfig).toMatch(/linux:\r?\n  icon: icon\.png/)
+    expect(electronBuilderConfig).toMatch(/mac:\r?\n  icon: icon\.icns/)
+    expect(preparePackageAppScript).toContain('buildResources: ../../build')
+    expect(preparePackageAppScript).toMatch(/win:\r?\n  icon: icon\.ico/)
+    expect(preparePackageAppScript).toMatch(/linux:\r?\n  icon: icon\.png/)
+    expect(preparePackageAppScript).toMatch(/mac:\r?\n  icon: icon\.icns/)
   })
 })

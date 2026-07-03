@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import { isAbsoluteFilePath, isUntitledFileId } from '../../../workspace/workspaceFiles';
 
 interface EditorDocumentTab {
@@ -30,7 +31,7 @@ export function useEditorDocumentState({
   const [localContentCache, setLocalContentCache] = useState<Record<string, string>>({});
   const [localLoadingFiles, setLocalLoadingFiles] = useState<Record<string, boolean>>({});
   const [localLoadErrors, setLocalLoadErrors] = useState<Record<string, string>>({});
-  const inFlightLoadsRef = useRef<Set<string>>(new Set());
+  const inFlightLoadsRef = useLazyRef(() => new Set<string>());
   const isMountedRef = useRef(true);
   const effectiveTabId = documentTabId ?? activeTabId;
 

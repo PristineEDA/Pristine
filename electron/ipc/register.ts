@@ -7,13 +7,16 @@ import { registerGitHandlers, setGitProjectRoot } from './git.js';
 import { registerLspHandlers, setLspProjectRoot } from './lsp.js';
 import { registerShellHandlers, setShellProjectRoot } from './shell.js';
 import { registerTerminalHandlers, setTerminalProjectRoot } from './terminal.js';
+import { registerWslHandlers } from './wsl.js';
 import { registerConfigHandlers } from './config.js';
 import { registerPlatformHandler } from './platform.js';
 import { registerAuthHandlers } from './auth.js';
 import { registerNoticeHandlers } from './notices.js';
+import { registerNotificationHandlers } from './notifications.js';
 import { registerProjectHandlers } from './project.js';
 import type { WindowCloseDecision } from '../../src/app/window/windowClose.js';
 import type { FloatingInfoWindowMode } from '../../src/app/window/floatingInfoWindow.js';
+import type { ProjectWindowState } from '../../types/project.js';
 
 export function setProjectRoot(root: string | null): void {
   const resolved = root ? path.resolve(root) : null;
@@ -31,6 +34,9 @@ export function registerAllHandlers(
   setFloatingInfoWindowExpanded: (expanded: boolean) => boolean = () => false,
   setFloatingInfoWindowMode: (mode: FloatingInfoWindowMode) => boolean = () => false,
   resolveCloseRequest: (requestId: number, decision: WindowCloseDecision) => boolean = () => false,
+  getProjectWindowState: () => ProjectWindowState | null = () => null,
+  applyProjectWindowState: (windowState: ProjectWindowState | null | undefined) => void = () => undefined,
+  markWorkspaceReady: () => void = () => undefined,
 ): void {
   registerPlatformHandler();
   registerDialogHandlers(getMainWindow);
@@ -40,14 +46,17 @@ export function registerAllHandlers(
     setFloatingInfoWindowExpanded,
     setFloatingInfoWindowMode,
     resolveCloseRequest,
+    markWorkspaceReady,
   );
   registerFilesystemHandlers();
   registerGitHandlers(getMainWindow);
   registerLspHandlers(getMainWindow);
   registerShellHandlers(getMainWindow);
   registerTerminalHandlers(getMainWindow);
+  registerWslHandlers();
   registerConfigHandlers();
-  registerProjectHandlers(getMainWindow, setProjectRoot);
+  registerNotificationHandlers(getMainWindow);
+  registerProjectHandlers(getMainWindow, setProjectRoot, getProjectWindowState, applyProjectWindowState);
   registerAuthHandlers();
   registerNoticeHandlers();
 }

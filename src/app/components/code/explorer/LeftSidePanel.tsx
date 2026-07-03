@@ -25,6 +25,7 @@ import {
 } from '../shared/codeViewerLayoutStyles';
 import {
   WORKSPACE_ROOT_PATH,
+  findWorkspaceNode,
   getWorkspaceParentPath,
   isWorkspaceRelativeFilePath,
   type ExplorerSelectedNode,
@@ -35,6 +36,7 @@ import {
   validateWorkspaceEntryName,
 } from '../../../workspace/workspaceFiles';
 import { useWorkspaceTree, type WorkspaceRevealRequest } from '../../../workspace/useWorkspaceTree';
+import { useExplorerTreeSessionStore } from '../../../workspace/useExplorerTreeSessionStore';
 import {
   canRunExplorerDocumentKeyboardAction,
   getExplorerClipboardTarget,
@@ -122,6 +124,7 @@ export function LeftSidePanel({
   const pendingTreeDrivenActiveFileSelectionRef = useRef<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<ExplorerSelectedNode | null>(null);
   const latestSelectedNodeRef = useRef<ExplorerSelectedNode | null>(null);
+  const restoredTreeScrollTopRef = useRef<number | null>(null);
   const [treeEditSession, setTreeEditSession] = useState<ExplorerTreeEditSession | null>(null);
   const [contextMenuRequest, setContextMenuRequest] = useState<ExplorerContextMenuRequest | null>(null);
   const [handledRevealRequestToken, setHandledRevealRequestToken] = useState<number | null>(null);
@@ -129,6 +132,10 @@ export function LeftSidePanel({
   const setTab = useSidePanelSessionStore((state) => state.setExplorerLeftTab);
   const isSplitPanelVisible = useSidePanelSessionStore((state) => state.leftSplitVisible);
   const setIsSplitPanelVisible = useSidePanelSessionStore((state) => state.setExplorerLeftSplitVisible);
+  const persistedSelectedNode = useExplorerTreeSessionStore((state) => state.selectedNode);
+  const persistedScrollTop = useExplorerTreeSessionStore((state) => state.scrollTop);
+  const setPersistedSelectedNode = useExplorerTreeSessionStore((state) => state.setSelectedNode);
+  const setPersistedScrollTop = useExplorerTreeSessionStore((state) => state.setScrollTop);
   const splitPanelPresence = useAnimatedSplitPanelPresence(isSplitPanelVisible);
   const gitStatus = useWorkspaceGitStatus();
   const {
@@ -142,6 +149,27 @@ export function LeftSidePanel({
   });
 
   latestSelectedNodeRef.current = selectedNode;
+
+  const updateSelectedNode = useCallback((nextNode: ExplorerSelectedNode | null) => {
+    setSelectedNode(nextNode);
+
+    if (!nextNode) {
+      setPersistedSelectedNode(null);
+      return;
+    }
+
+    if (nextNode.source === 'real' && (nextNode.type === 'file' || nextNode.type === 'folder')) {
+      setPersistedSelectedNode({
+        path: nextNode.path,
+        type: nextNode.type,
+      });
+      return;
+    }
+
+    if (nextNode.source === 'real' && nextNode.type === 'root') {
+      setPersistedSelectedNode(null);
+    }
+  }, [setPersistedSelectedNode]);
 
   useEffect(() => {
     onSplitPanelVisibleChange?.(splitPanelPresence.shouldRender);
@@ -182,10 +210,10 @@ export function LeftSidePanel({
   }, []);
 
   const startCopyForNode = useCallback(async (path: string, entryType: WorkspaceEntryType) => {
-    setSelectedNode(createRealExplorerSelection(path, entryType));
+    updateSelectedNode(createRealExplorerSelection(path, entryType));
     await onCopyWorkspaceEntry(path, entryType);
     focusTree();
-  }, [focusTree, onCopyWorkspaceEntry]);
+  }, [focusTree, onCopyWorkspaceEntry, updateSelectedNode]);
 
   const startCopyFromSelection = useCallback(async () => {
     const clipboardTarget = getExplorerClipboardTarget(selectedNode, activeFileId);
@@ -198,10 +226,10 @@ export function LeftSidePanel({
   }, [activeFileId, selectedNode, startCopyForNode]);
 
   const startCutForNode = useCallback(async (path: string, entryType: WorkspaceEntryType) => {
-    setSelectedNode(createRealExplorerSelection(path, entryType));
+    updateSelectedNode(createRealExplorerSelection(path, entryType));
     await onCutWorkspaceEntry(path, entryType);
     focusTree();
-  }, [focusTree, onCutWorkspaceEntry]);
+  }, [focusTree, onCutWorkspaceEntry, updateSelectedNode]);
 
   const startCutFromSelection = useCallback(async () => {
     const clipboardTarget = getExplorerClipboardTarget(selectedNode, activeFileId);
@@ -221,10 +249,10 @@ export function LeftSidePanel({
       return;
     }
 
-    setSelectedNode(createRealExplorerSelection(pastedEntry.path, pastedEntry.entryType));
+    updateSelectedNode(createRealExplorerSelection(pastedEntry.path, pastedEntry.entryType));
     monacoDeleteSelectionArmedRef.current = true;
     focusTree();
-  }, [focusTree, onPasteWorkspaceEntry]);
+  }, [focusTree, onPasteWorkspaceEntry, updateSelectedNode]);
 
   const startPasteForNode = useCallback(async (path: string, entryType: ExplorerSelectedNode['type']) => {
     const destinationFolderPath = entryType === 'file' ? getWorkspaceParentPath(path) : path;
@@ -407,8 +435,41 @@ export function LeftSidePanel({
       pendingTreeDrivenActiveFileSelectionRef.current = null;
     }
 
-    setSelectedNode(createRealExplorerSelection(activeFileId, 'file'));
-  }, [activeFileId, treeEditSession]);
+    updateSelectedNode(createRealExplorerSelection(activeFileId, 'file'));
+  }, [activeFileId, treeEditSession, updateSelectedNode]);
+
+  useEffect(() => {
+    if (!persistedSelectedNode || treeEditSession || workspaceAvailable !== true) {
+      return;
+    }
+
+    const matchingNode = findWorkspaceNode(treeNodes, persistedSelectedNode.path);
+    if (!matchingNode || matchingNode.type !== persistedSelectedNode.type) {
+      return;
+    }
+
+    setSelectedNode(createRealExplorerSelection(persistedSelectedNode.path, persistedSelectedNode.type));
+  }, [persistedSelectedNode, treeEditSession, treeNodes, workspaceAvailable]);
+
+  useEffect(() => {
+    if (workspaceAvailable !== true || !treeContainerRef.current) {
+      return;
+    }
+
+    if (restoredTreeScrollTopRef.current === persistedScrollTop) {
+      return;
+    }
+
+    const treeContainer = treeContainerRef.current;
+    const animationFrame = window.requestAnimationFrame(() => {
+      treeContainer.scrollTop = persistedScrollTop;
+      restoredTreeScrollTopRef.current = persistedScrollTop;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [persistedScrollTop, treeNodes, workspaceAvailable]);
 
   const ensureFolderExpanded = useCallback((folderPath: string) => {
     if (!expandedFolders.has(folderPath)) {
@@ -430,40 +491,40 @@ export function LeftSidePanel({
 
   const handleNodeSelect = useCallback((nextNode: ExplorerSelectedNode) => {
     flushSync(() => {
-      setSelectedNode(nextNode);
+      updateSelectedNode(nextNode);
     });
     monacoDeleteSelectionArmedRef.current = nextNode.source === 'real' && nextNode.type !== 'root';
     focusTree();
-  }, [focusTree]);
+  }, [focusTree, updateSelectedNode]);
 
   const handleFilePreview = useCallback((fileId: string, fileName: string) => {
     pendingTreeDrivenActiveFileSelectionRef.current = fileId;
     flushSync(() => {
-      setSelectedNode(createRealExplorerSelection(fileId, 'file'));
+      updateSelectedNode(createRealExplorerSelection(fileId, 'file'));
     });
     monacoDeleteSelectionArmedRef.current = true;
     onFilePreview(fileId, fileName);
     focusTree();
-  }, [focusTree, onFilePreview]);
+  }, [focusTree, onFilePreview, updateSelectedNode]);
 
   const handleFileOpen = useCallback((fileId: string, fileName: string) => {
     pendingTreeDrivenActiveFileSelectionRef.current = fileId;
     flushSync(() => {
-      setSelectedNode(createRealExplorerSelection(fileId, 'file'));
+      updateSelectedNode(createRealExplorerSelection(fileId, 'file'));
     });
     monacoDeleteSelectionArmedRef.current = true;
     onFileOpen(fileId, fileName);
     focusTree();
-  }, [focusTree, onFileOpen]);
+  }, [focusTree, onFileOpen, updateSelectedNode]);
 
   const handleGitDiffOpen = useCallback((fileId: string, fileName: string) => {
     flushSync(() => {
-      setSelectedNode(createRealExplorerSelection(fileId, 'file'));
+      updateSelectedNode(createRealExplorerSelection(fileId, 'file'));
     });
     monacoDeleteSelectionArmedRef.current = false;
     onGitDiffOpen?.(fileId, fileName);
     focusTree();
-  }, [focusTree, onGitDiffOpen]);
+  }, [focusTree, onGitDiffOpen, updateSelectedNode]);
 
   const startRenameForNode = useCallback((path: string, entryType: 'file' | 'folder') => {
     const editState = createExplorerRenameEditState({ entryType, path });
@@ -472,9 +533,9 @@ export function LeftSidePanel({
       return;
     }
 
-    setSelectedNode(editState.selectedNode);
+    updateSelectedNode(editState.selectedNode);
     setTreeEditSession(editState.treeEditSession);
-  }, []);
+  }, [updateSelectedNode]);
 
   const startRenameFromSelection = useCallback(() => {
     const renameTarget = getExplorerRenameTarget(selectedNode, activeFileId);
@@ -487,7 +548,7 @@ export function LeftSidePanel({
   const startDeleteForNode = useCallback(async (path: string, entryType: 'file' | 'folder') => {
     const parentPath = getWorkspaceParentPath(path);
 
-    setSelectedNode(createRealExplorerSelection(path, entryType));
+    updateSelectedNode(createRealExplorerSelection(path, entryType));
     armTreeScrollLockForNextRefresh(path);
 
     const deleted = await onDeleteWorkspaceEntry(path, entryType);
@@ -497,12 +558,12 @@ export function LeftSidePanel({
       return;
     }
 
-    setSelectedNode(createRealExplorerSelection(
+    updateSelectedNode(createRealExplorerSelection(
       parentPath,
       parentPath === WORKSPACE_ROOT_PATH ? 'root' : 'folder',
     ));
     focusTree();
-  }, [armTreeScrollLockForNextRefresh, focusTree, onDeleteWorkspaceEntry, releaseTreeScrollLock]);
+  }, [armTreeScrollLockForNextRefresh, focusTree, onDeleteWorkspaceEntry, releaseTreeScrollLock, updateSelectedNode]);
 
   const startDeleteFromSelection = useCallback(async () => {
     const deleteTarget = getExplorerDeleteTarget(selectedNode);
@@ -522,9 +583,9 @@ export function LeftSidePanel({
       parentPath: resolvedParentPath,
     });
 
-    setSelectedNode(editState.selectedNode);
+    updateSelectedNode(editState.selectedNode);
     setTreeEditSession(editState.treeEditSession);
-  }, [ensureFolderExpanded, selectedParentPath]);
+  }, [ensureFolderExpanded, selectedParentPath, updateSelectedNode]);
 
   const cancelTreeEdit = useCallback(() => {
     if (!treeEditSession || treeEditSession.isSubmitting) {
@@ -532,9 +593,9 @@ export function LeftSidePanel({
     }
 
     setTreeEditSession(null);
-    setSelectedNode(getExplorerEditCancelSelection(treeEditSession));
+    updateSelectedNode(getExplorerEditCancelSelection(treeEditSession));
     focusTree();
-  }, [focusTree, treeEditSession]);
+  }, [focusTree, treeEditSession, updateSelectedNode]);
 
   const handleTreeEditValueChange = useCallback((value: string) => {
     setTreeEditSession((current) => {
@@ -564,7 +625,7 @@ export function LeftSidePanel({
 
     if (treeEditSession.mode === 'rename' && treeEditValidation.nextPath === treeEditSession.targetPath) {
       setTreeEditSession(null);
-      setSelectedNode(createRealExplorerSelection(treeEditSession.targetPath, treeEditSession.entryType));
+      updateSelectedNode(createRealExplorerSelection(treeEditSession.targetPath, treeEditSession.entryType));
       focusTree();
       return;
     }
@@ -586,13 +647,13 @@ export function LeftSidePanel({
           treeEditValidation.nextPath,
           treeEditSession.entryType,
         );
-        setSelectedNode(createRealExplorerSelection(treeEditValidation.nextPath, treeEditSession.entryType));
+        updateSelectedNode(createRealExplorerSelection(treeEditValidation.nextPath, treeEditSession.entryType));
       } else if (treeEditSession.mode === 'create-file') {
         await onCreateWorkspaceFile(treeEditValidation.nextPath);
-        setSelectedNode(createRealExplorerSelection(treeEditValidation.nextPath, 'file'));
+        updateSelectedNode(createRealExplorerSelection(treeEditValidation.nextPath, 'file'));
       } else {
         await onCreateWorkspaceFolder(treeEditValidation.nextPath);
-        setSelectedNode(createRealExplorerSelection(treeEditValidation.nextPath, 'folder'));
+        updateSelectedNode(createRealExplorerSelection(treeEditValidation.nextPath, 'folder'));
       }
 
       setTreeEditSession(null);
@@ -616,6 +677,7 @@ export function LeftSidePanel({
     releaseTreeScrollLock,
     treeEditSession,
     treeEditValidation,
+    updateSelectedNode,
   ]);
 
   const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -703,6 +765,9 @@ export function LeftSidePanel({
             tabIndex={0}
             className="explorer-tree-scrollbar flex-1 overflow-y-auto overflow-x-hidden outline-none [overflow-anchor:none]"
             onKeyDown={handleTreeKeyDown}
+            onScroll={(event) => {
+              setPersistedScrollTop(event.currentTarget.scrollTop);
+            }}
           >
             {workspaceAvailable === null && (
               <div className="px-4 py-3 text-ide-text-muted text-[12px]">Loading workspace...</div>
@@ -910,3 +975,4 @@ function ExplorerSecondaryPanel({
     </section>
   );
 }
+

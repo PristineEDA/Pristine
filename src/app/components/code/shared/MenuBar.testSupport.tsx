@@ -9,6 +9,7 @@ import { CodeViewerLayoutProvider, type CodeViewerLayoutMode } from '../../../co
 import type { ColorThemeOption, ColorThemePreviewPalette, ResolvedColorTheme } from '../../../theme/colorThemeTypes';
 import { SidebarProvider, useSidebar } from '../../ui/sidebar';
 import { resetMenuChromeStoreForTests } from './useMenuChromeStore';
+import { resetProjectDialogStoreForTests } from './useProjectDialogStore';
 import { resetSettingsDialogSessionForTests } from './useSettingsDialogSessionStore';
 
 export const ensureEditorFontFamilyLoadedMock = vi.fn<(fontFamily: string) => Promise<void>>(() => Promise.resolve());
@@ -924,6 +925,7 @@ function resetElectronApiMocks() {
 
 beforeEach(() => {
   resetMenuChromeStoreForTests();
+  resetProjectDialogStoreForTests();
   resetSettingsDialogSessionForTests();
   resetWorkspaceSessionStoreForTests();
   resetContextMockState();
@@ -951,6 +953,8 @@ export type PersistedSettingsOptions = {
   indentGuides?: boolean;
   lineNumbers?: string;
   minimapEnabled?: boolean;
+  notificationDismissSeconds?: number;
+  progressHideCompleted?: boolean;
   renderControlCharacters?: boolean;
   renderWhitespace?: string;
   scrollBeyondLastLine?: boolean;
@@ -979,6 +983,8 @@ export function mockPersistedSettingsConfig(options: PersistedSettingsOptions = 
     indentGuides: true,
     lineNumbers: 'on',
     minimapEnabled: true,
+    notificationDismissSeconds: 5,
+    progressHideCompleted: true,
     renderControlCharacters: false,
     renderWhitespace: 'selection',
     scrollBeyondLastLine: false,
@@ -1031,6 +1037,10 @@ export function mockPersistedSettingsConfig(options: PersistedSettingsOptions = 
         return persisted.lineNumbers;
       case 'editor.minimap.enabled':
         return persisted.minimapEnabled;
+      case 'notifications.dismissSeconds':
+        return persisted.notificationDismissSeconds;
+      case 'progress.hideCompleted':
+        return persisted.progressHideCompleted;
       case 'editor.renderControlCharacters':
         return persisted.renderControlCharacters;
       case 'editor.renderWhitespace':
@@ -1104,17 +1114,17 @@ function WorkspaceControls() {
 
   return (
     <div>
-      <button onClick={() => setActiveView('simulation')}>set-simulation</button>
-      <button onClick={() => setActiveView('synthesis')}>set-synthesis</button>
-      <button onClick={() => setActiveView('physical')}>set-physical</button>
-      <button onClick={() => setActiveView('factory')}>set-factory</button>
-      <button onClick={() => setMainContentView('whiteboard')}>set-whiteboard</button>
-      <button onClick={() => setMainContentView('code')}>set-code</button>
-      <button onClick={() => openFile('rtl/core/reg_file.v', 'reg_file.v')}>open-reg</button>
-      <button onClick={() => openFile('rtl/core/alu.v', 'alu.v')}>open-alu</button>
-      <button onClick={() => updateFileContentInGroup('group-1', 'rtl/core/reg_file.v', 'module reg_file; logic dirty; endmodule')}>edit-reg</button>
-      <button onClick={() => updateFileContentInGroup('group-1', 'rtl/core/alu.v', 'module alu; logic dirty; endmodule')}>edit-alu</button>
-      <button onClick={() => registerEditorRef('group-1', {
+      <button type="button" onClick={() => setActiveView('simulation')}>set-simulation</button>
+      <button type="button" onClick={() => setActiveView('synthesis')}>set-synthesis</button>
+      <button type="button" onClick={() => setActiveView('physical')}>set-physical</button>
+      <button type="button" onClick={() => setActiveView('factory')}>set-factory</button>
+      <button type="button" onClick={() => setMainContentView('whiteboard')}>set-whiteboard</button>
+      <button type="button" onClick={() => setMainContentView('code')}>set-code</button>
+      <button type="button" onClick={() => openFile('rtl/core/reg_file.v', 'reg_file.v')}>open-reg</button>
+      <button type="button" onClick={() => openFile('rtl/core/alu.v', 'alu.v')}>open-alu</button>
+      <button type="button" onClick={() => updateFileContentInGroup('group-1', 'rtl/core/reg_file.v', 'module reg_file; logic dirty; endmodule')}>edit-reg</button>
+      <button type="button" onClick={() => updateFileContentInGroup('group-1', 'rtl/core/alu.v', 'module alu; logic dirty; endmodule')}>edit-alu</button>
+      <button type="button" onClick={() => registerEditorRef('group-1', {
         getAction: (actionId: string) => ({ run: actionId === 'undo' ? undoActionRun : redoActionRun }),
       })}>register-editor</button>
     </div>

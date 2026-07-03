@@ -40,6 +40,7 @@ export function OutputPanel() {
         </div>
         {(['all', 'info', 'warn', 'error'] as const).map((l) => (
           <button
+            type="button"
             key={l}
             onClick={() => setLevelFilter(l)}
             className={`px-2 py-0.5 rounded transition-colors ${
@@ -50,7 +51,7 @@ export function OutputPanel() {
           </button>
         ))}
         <TooltipIconButton content="Clear">
-          <button aria-label="Clear" className="ml-auto p-1 text-ide-text-muted hover:text-ide-text transition-colors">
+          <button type="button" aria-label="Clear" className="ml-auto p-1 text-ide-text-muted hover:text-ide-text transition-colors">
             <Trash2 size={12} />
           </button>
         </TooltipIconButton>

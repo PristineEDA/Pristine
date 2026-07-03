@@ -131,6 +131,30 @@ beforeEach(() => {
     });
   }
 
+  if (!Element.prototype.hasPointerCapture) {
+    Object.defineProperty(Element.prototype, 'hasPointerCapture', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => false),
+    });
+  }
+
+  if (!Element.prototype.setPointerCapture) {
+    Object.defineProperty(Element.prototype, 'setPointerCapture', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
+  }
+
+  if (!Element.prototype.releasePointerCapture) {
+    Object.defineProperty(Element.prototype, 'releasePointerCapture', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
+  }
+
   if (typeof ResizeObserver === 'undefined') {
     class ResizeObserverMock {
       observe = vi.fn();

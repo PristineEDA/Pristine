@@ -120,7 +120,38 @@ describe('terminal IPC handlers', () => {
     await expect(createHandler({}, { cwd: 42 })).rejects.toThrow('Expected string or undefined for "cwd", got number');
     await expect(createHandler({}, { cols: 'wide' })).rejects.toThrow('Expected number for "cols", got string');
     await expect(createHandler({}, { rows: 'tall' })).rejects.toThrow('Expected number for "rows", got string');
+    await expect(createHandler({}, { profile: 'custom-shell' })).rejects.toThrow('Unsupported terminal profile.');
     expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('uses a restricted WSL command for the Pristine EDA terminal profile', async () => {
+    setProcessPlatform('win32');
+    const fakeTerminal = createFakeTerminal();
+    mockSpawn.mockReturnValue(fakeTerminal);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pristine-terminal-wsl-root-'));
+    const expectedCwd = fs.realpathSync(root);
+
+    try {
+      setTerminalProjectRoot(root);
+
+      const createHandler = getHandler('async:terminal:create');
+      const result = await createHandler({}, { profile: 'wsl-pristine-eda' });
+
+      expect(result).toEqual({
+        id: expect.any(String),
+        pid: 2468,
+        shell: 'pristine-eda-env',
+      });
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'wsl.exe',
+        ['--distribution', 'pristine-eda-env', '--cd', expectedCwd],
+        expect.objectContaining({
+          cwd: expectedCwd,
+        }),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('creates a terminal session and forwards data/exit streams', async () => {

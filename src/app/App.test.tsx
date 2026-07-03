@@ -3,10 +3,19 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { resetBottomPanelStoreForTests, useBottomPanelStore } from './components/code/explorer/useBottomPanelStore';
+import {
+  ensureTerminalSession,
+  getTerminalSessionSnapshot,
+  resetTerminalSessionStoreForTests,
+} from './components/code/explorer/terminalSessionStore';
 import { EXPLORER_RIGHT_PANEL_DEFAULT_WIDTH_PX } from './components/code/shared/CodeWorkspaceShell';
+import { resetProjectConfigureStoreForTests } from './components/code/shared/useProjectConfigureStore';
 import { resetWorkspaceSessionStoreForTests } from './context/useWorkspaceSessionStore';
 import { resetWorkspaceGitStatusStoreForTests } from './git/workspaceGitStatus';
+import { resetProgressStoreForTests, useProgressStore } from './progress/useProgressStore';
 import { resetQuickOpenStoreForTests } from './useQuickOpenStore';
+import { WSL_TERMINAL_SESSION_KEY, resetWslDevelopmentEnvironmentStoreForTests } from './wsl/useWslDevelopmentEnvironmentStore';
 
 let renderRealActivityBar = false;
 
@@ -49,6 +58,7 @@ vi.mock('./components/code/shared/MenuBar', async () => {
 
   return {
     MenuBar: ({
+    onNotificationProgressDemo,
     showLeftPanel,
     showBottomPanel,
     showRightPanel,
@@ -74,6 +84,7 @@ vi.mock('./components/code/shared/MenuBar', async () => {
         <button onClick={() => workspace.setMainContentView('code')}>switch-code</button>
         <button onClick={() => workspace.setMainContentView('whiteboard')}>switch-whiteboard</button>
         <button onClick={() => workspace.setMainContentView('workflow')}>switch-workflow</button>
+        <button data-testid="mock-menu-notif" onClick={onNotificationProgressDemo}>notif</button>
       </div>
     );
   },
@@ -122,9 +133,33 @@ vi.mock('./components/code/shared/ActivityBar', async () => {
   const actualActivityBar = await vi.importActual<typeof import('./components/code/shared/ActivityBar')>('./components/code/shared/ActivityBar');
 
   return {
-    ActivityBar: ({ activeView, onItemSelect }: { activeView: string; onItemSelect: (view: string) => void }) => {
+    ActivityBar: ({
+      activeView,
+      canConfigureProject = false,
+      onItemSelect,
+      onProjectConfigure,
+      onRunAction,
+      canRunDevelopmentEnvironment,
+      isDevelopmentEnvironmentActive,
+    }: {
+      activeView: string;
+      canConfigureProject?: boolean;
+      canRunDevelopmentEnvironment?: boolean;
+      isDevelopmentEnvironmentActive?: boolean;
+      onItemSelect: (view: string) => void;
+      onProjectConfigure?: () => void;
+      onRunAction?: () => void;
+    }) => {
       if (renderRealActivityBar) {
-        return <actualActivityBar.ActivityBar activeView={activeView} onItemSelect={onItemSelect} />;
+        return (
+          <actualActivityBar.ActivityBar
+            activeView={activeView}
+            canConfigureProject={canConfigureProject}
+            onItemSelect={onItemSelect}
+            onProjectConfigure={onProjectConfigure}
+            onRunAction={onRunAction}
+          />
+        );
       }
 
       const activityBar = sidebar.useSidebar();
@@ -138,6 +173,21 @@ vi.mock('./components/code/shared/ActivityBar', async () => {
           <button onClick={() => onItemSelect('physical')}>select-physical</button>
           <button onClick={() => onItemSelect('factory')}>select-factory</button>
           <button onClick={() => onItemSelect('explorer')}>select-explorer</button>
+          <button
+            disabled={!canConfigureProject}
+            data-testid="mock-activity-configure"
+            onClick={onProjectConfigure}
+          >
+            configure-project
+          </button>
+          <button
+            data-testid="mock-activity-run"
+            disabled={!canRunDevelopmentEnvironment}
+            data-active={isDevelopmentEnvironmentActive ? 'true' : 'false'}
+            onClick={onRunAction}
+          >
+            {isDevelopmentEnvironmentActive ? 'pause' : 'run'}
+          </button>
         </div>
       );
     },
@@ -315,6 +365,11 @@ describe('App', () => {
     testUser = userEvent.setup();
     renderRealActivityBar = false;
     resetQuickOpenStoreForTests();
+    resetBottomPanelStoreForTests();
+    resetTerminalSessionStoreForTests();
+    resetProjectConfigureStoreForTests();
+    resetProgressStoreForTests();
+    resetWslDevelopmentEnvironmentStoreForTests();
     resetWorkspaceSessionStoreForTests();
     resetWorkspaceGitStatusStoreForTests();
     vi.clearAllMocks();
@@ -580,6 +635,161 @@ describe('App', () => {
     } finally {
       renderRealActivityBar = false;
     }
+  });
+
+  it('starts notification and progress demos from the File notif action', () => {
+    vi.useFakeTimers();
+
+    const { unmount } = render(<App />);
+
+    try {
+      fireEvent.click(screen.getByTestId('mock-menu-notif'));
+
+      expect(window.electronAPI!.notifications.publish).toHaveBeenCalledWith(expect.objectContaining({
+        level: 'info',
+        title: 'Info notification',
+        variant: 'standard',
+      }));
+      expect(useProgressStore.getState().sessions.map((session) => session.title)).toEqual([
+        'Scanning RTL Sources',
+        'Indexing SystemVerilog Symbols',
+        'Resolving Module Hierarchy',
+        'Preparing Schematic Graph',
+        'Checking Timing Reports',
+        'Synchronizing Waveform Data',
+      ]);
+
+      act(() => {
+        vi.advanceTimersByTime(4200);
+      });
+
+      expect(useProgressStore.getState().sessions.map((session) => session.title)).not.toContain('Scanning RTL Sources');
+      expect(useProgressStore.getState().lastCompletedSession).toMatchObject({
+        title: 'Scanning RTL Sources',
+        value: 100,
+      });
+
+      fireEvent.click(screen.getByTestId('mock-menu-notif'));
+      expect(window.electronAPI!.notifications.publish).toHaveBeenLastCalledWith(expect.objectContaining({
+        actions: [{ label: 'Mark as Read' }, { label: 'Delete' }],
+        level: 'warning',
+        title: 'Warning notification',
+        variant: 'actions',
+      }));
+    } finally {
+      unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      resetProgressStoreForTests();
+    }
+  });
+
+  it('opens Configure Project from the activity bar only after a project is available', async () => {
+    vi.mocked(window.electronAPI!.project.getCurrentProject).mockResolvedValueOnce(null);
+    render(<App />);
+
+    expect(screen.getByTestId('mock-activity-configure')).toBeDisabled();
+    await waitFor(() => {
+      expect(window.electronAPI!.project.getCurrentProject).toHaveBeenCalled();
+      expect(window.electronAPI!.project.onProjectChanged).toHaveBeenCalled();
+    });
+
+    const project = {
+      config: {
+        mgnt: 'item1',
+        mode: 'rtl',
+        padframe: 'QFN64',
+        process: 'ihp130',
+        type: 'ysyxSoC',
+      },
+      name: 'chip_lab',
+      rootPath: 'C:\\Projects\\chip_lab',
+      session: null,
+    };
+    const projectChangedCalls = vi.mocked(window.electronAPI!.project.onProjectChanged).mock.calls;
+    const projectChangedHandler = projectChangedCalls[projectChangedCalls.length - 1]?.[0];
+    await act(async () => {
+      projectChangedHandler?.(project);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-activity-configure')).toBeEnabled();
+    });
+
+    await clickTestId('mock-activity-configure');
+
+    expect(screen.getByTestId('configure-project-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('configure-project-name')).toHaveTextContent('chip_lab');
+    expect(screen.getByTestId('configure-project-mode')).toHaveTextContent('rtl');
+    expect(screen.getByTestId('configure-project-process')).toHaveTextContent('ihp130');
+    expect(screen.getByTestId('configure-project-padframe')).toHaveTextContent('QFN64');
+
+    await clickTestId('configure-project-submit');
+
+    expect(window.electronAPI!.project.updateProjectConfig).toHaveBeenCalledWith(project.config);
+  });
+
+  it('starts the WSL development environment from Run and restores the focused terminal pane on Pause', async () => {
+    vi.mocked(window.electronAPI!.project.getCurrentProject).mockResolvedValueOnce(null);
+    render(<App />);
+
+    expect(screen.getByTestId('mock-activity-run')).toBeDisabled();
+    await waitFor(() => {
+      expect(window.electronAPI!.project.getCurrentProject).toHaveBeenCalled();
+      expect(window.electronAPI!.project.onProjectChanged).toHaveBeenCalled();
+    });
+
+    const project = {
+      config: {
+        mgnt: 'none',
+        mode: 'rtl2gds',
+        padframe: 'QFN32',
+        process: 'ics55',
+        type: 'retroSoC',
+      },
+      name: 'chip_lab',
+      rootPath: 'C:\\Projects\\chip_lab',
+      session: null,
+    };
+    const projectChangedCalls = vi.mocked(window.electronAPI!.project.onProjectChanged).mock.calls;
+    const projectChanged = projectChangedCalls[projectChangedCalls.length - 1]?.[0];
+    await act(async () => {
+      projectChanged?.(project);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-activity-run')).toBeEnabled();
+    });
+
+    await act(async () => {
+      await ensureTerminalSession('bottom-pane-1');
+    });
+    expect(getTerminalSessionSnapshot('bottom-pane-1').sessionId).toBe('terminal-1');
+
+    fireEvent.click(screen.getByTestId('mock-activity-run'));
+
+    await waitFor(() => {
+      expect(window.electronAPI!.wsl.startPristineEdaEnvironment).toHaveBeenCalledWith({ ubuntuDistro: 'Ubuntu-22.04' });
+    });
+    expect(screen.getByTestId('mock-activity-run')).toHaveAttribute('data-active', 'true');
+    expect(useBottomPanelStore.getState().panes[0]?.content).toEqual({
+      kind: 'tab',
+      tab: 'terminal',
+      terminalProfile: 'wsl-pristine-eda',
+    });
+    expect(getTerminalSessionSnapshot('bottom-pane-1').sessionId).toBe('terminal-1');
+
+    fireEvent.click(screen.getByTestId('mock-activity-run'));
+
+    await waitFor(() => {
+      expect(window.electronAPI!.wsl.stopPristineEdaEnvironment).toHaveBeenCalled();
+    });
+
+    expect(window.electronAPI!.terminal.kill).not.toHaveBeenCalledWith('terminal-1');
+    expect(window.electronAPI!.terminal.kill).not.toHaveBeenCalledWith(WSL_TERMINAL_SESSION_KEY);
+    expect(getTerminalSessionSnapshot('bottom-pane-1').sessionId).toBe('terminal-1');
+    expect(useBottomPanelStore.getState().panes[0]?.content).toEqual({ kind: 'tab', tab: 'terminal' });
+    expect(screen.getByTestId('mock-activity-run')).toHaveAttribute('data-active', 'false');
   });
 
   it('toggles the left, bottom, and right panels with Ctrl+B, Ctrl+J, and Ctrl+Alt+B', () => {

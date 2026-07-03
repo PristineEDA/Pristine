@@ -82,6 +82,58 @@ describe('useSidePanelSessionStore', () => {
     expect(getStore().physicalBottomTab).toBe('console');
   });
 
+  it('captures and hydrates project side panel chrome without reload nonce', () => {
+    getStore().setExplorerLeftTab('git');
+    getStore().setExplorerLeftSecondaryTab('libraries');
+    getStore().setExplorerLeftSplitVisible(true);
+    getStore().setExplorerRightTab('outline');
+    getStore().setExplorerRightSecondaryTab('x-propagation');
+    getStore().setExplorerRightSplitVisible(true);
+    getStore().setAssistantThreadListExpanded(true);
+    getStore().setAssistantThreadListWidth(360);
+    getStore().setPhysicalBottomTab('console');
+    getStore().setPhysicalLeftTab('constraints');
+    getStore().setPhysicalLeftSplitVisible(true);
+    getStore().setPhysicalRightTab('checks');
+    getStore().setPhysicalRightSplitVisible(true);
+    getStore().bumpExplorerLeftHierarchyReloadNonce();
+
+    const snapshot = getStore().captureProjectSidePanelSession();
+    resetSidePanelSessionStoreForTests();
+    getStore().hydrateProjectSidePanelSession(snapshot);
+
+    expect(getStore().leftPrimaryTab).toBe('git');
+    expect(getStore().leftSecondaryTab).toBe('libraries');
+    expect(getStore().leftSplitVisible).toBe(true);
+    expect(getStore().rightPrimaryTab).toBe('outline');
+    expect(getStore().rightSecondaryTab).toBe('x-propagation');
+    expect(getStore().rightSplitVisible).toBe(true);
+    expect(getStore().assistantThreadListExpanded).toBe(true);
+    expect(getStore().assistantThreadListWidth).toBe(360);
+    expect(getStore().physicalBottomTab).toBe('console');
+    expect(getStore().physicalLeftTab).toBe('constraints');
+    expect(getStore().physicalLeftSplitVisible).toBe(true);
+    expect(getStore().physicalRightTab).toBe('checks');
+    expect(getStore().physicalRightSplitVisible).toBe(true);
+    expect(getStore().leftHierarchyReloadNonce).toBe(0);
+
+    getStore().hydrateProjectSidePanelSession(null);
+
+    expect(getStore().leftPrimaryTab).toBe('explorer');
+    expect(getStore().leftSecondaryTab).toBe('hierarchy');
+    expect(getStore().leftSplitVisible).toBe(false);
+    expect(getStore().rightPrimaryTab).toBe('ai');
+    expect(getStore().rightSecondaryTab).toBe('module-info');
+    expect(getStore().rightSplitVisible).toBe(false);
+    expect(getStore().assistantThreadListExpanded).toBe(false);
+    expect(getStore().assistantThreadListWidth).toBe(ASSISTANT_THREAD_LIST_DEFAULT_WIDTH_PX);
+    expect(getStore().physicalBottomTab).toBe('reports');
+    expect(getStore().physicalLeftTab).toBe('layout');
+    expect(getStore().physicalLeftSplitVisible).toBe(false);
+    expect(getStore().physicalRightTab).toBe('layers');
+    expect(getStore().physicalRightSplitVisible).toBe(false);
+  });
+
   it('resets all side panel chrome state to defaults', () => {
     getStore().setExplorerLeftTab('git');
     getStore().setExplorerRightTab('references');

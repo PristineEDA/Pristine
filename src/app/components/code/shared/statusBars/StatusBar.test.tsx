@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LspProblem } from '../../../../lsp/lspProblems';
+import { resetNotificationStoreForTests, useNotificationStore } from '../../../../notifications/useNotificationStore';
+import { endProgressSession, resetProgressStoreForTests, startProgressSession } from '../../../../progress/useProgressStore';
 import { StatusBar } from './StatusBar';
 
 const HOVER_CARD_TEST_OPEN_DELAY_MS = 200;
@@ -100,6 +102,15 @@ vi.mock('../../../../git/workspaceGitStatus', () => ({
 
 describe('StatusBar', () => {
   beforeEach(() => {
+    resetNotificationStoreForTests();
+    resetProgressStoreForTests();
+    vi.mocked(window.electronAPI!.config.get).mockImplementation((key: string) => {
+      if (key === 'progress.hideCompleted') {
+        return true;
+      }
+
+      return undefined;
+    });
     mockedGitStatus.branchName = 'feature/git-ui';
     mockedGitStatus.hasProjectFiles = true;
     mockedGitStatus.isGitRepo = true;
@@ -133,6 +144,91 @@ describe('StatusBar', () => {
     expect(screen.getByText('Verilator 5.024')).toBeInTheDocument();
     expect(screen.getByTestId('status-bar-error-count')).toHaveTextContent('1');
     expect(screen.getByTestId('status-bar-warning-count')).toHaveTextContent('1');
+  });
+
+  it('hides the progress widget when no progress is active by default', () => {
+    render(
+      <StatusBar activeFileId="" cursorLine={1} cursorCol={1} />,
+    );
+
+    expect(screen.queryByTestId('status-bar-progress-summary')).not.toBeInTheDocument();
+  });
+
+  it('shows the oldest active progress session in the status bar', () => {
+    startProgressSession({ id: 'first', title: 'Scanning RTL Sources', source: 'Run', value: 25 });
+    startProgressSession({ id: 'second', title: 'Resolving Module Hierarchy', source: 'Run', value: 60 });
+
+    render(
+      <StatusBar activeFileId="" cursorLine={1} cursorCol={1} />,
+    );
+
+    expect(screen.getByTestId('status-bar-progress-title')).toHaveTextContent('Scanning RTL Sources');
+    expect(screen.getByTestId('status-bar-progress-value')).toHaveTextContent('25%');
+    expect(screen.getByTestId('status-bar-progress-bar')).toHaveAttribute('aria-label', 'Scanning RTL Sources progress');
+  });
+
+  it('shows active progress sessions newest first on hover', async () => {
+    useHoverCardFakeTimers();
+    vi.setSystemTime(1000);
+    startProgressSession({ id: 'first', title: 'Scanning RTL Sources', source: 'Run', value: 25 });
+    vi.setSystemTime(2000);
+    startProgressSession({ id: 'second', title: 'Resolving Module Hierarchy', source: 'Run', value: 60 });
+
+    try {
+      render(
+        <StatusBar activeFileId="" cursorLine={1} cursorCol={1} />,
+      );
+
+      const progressTrigger = screen.getByTestId('status-bar-progress-summary').closest('[data-slot="hover-card-trigger"]');
+      expect(progressTrigger).not.toBeNull();
+
+      fireEvent.pointerEnter(progressTrigger as HTMLElement, { pointerType: 'mouse' });
+      await advanceHoverCardOpenDelay();
+
+      expect(screen.getByTestId('status-bar-progress-popover')).toBeInTheDocument();
+      expect(screen.getByTestId('status-bar-progress-list')).toHaveClass('overflow-y-auto');
+      expect(screen.getByTestId('status-bar-progress-card-title-second').compareDocumentPosition(
+        screen.getByTestId('status-bar-progress-card-title-first'),
+      )).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(screen.getByTestId('status-bar-progress-card-second')).toBeInTheDocument();
+      expect(screen.getByTestId('status-bar-progress-card-first')).toBeInTheDocument();
+    } finally {
+      await cleanupHoverCardTimers();
+    }
+  });
+
+  it('removes ended progress sessions and switches to the next active one', () => {
+    const firstId = startProgressSession({ id: 'first', title: 'Scanning RTL Sources', source: 'Run', value: 25 });
+    startProgressSession({ id: 'second', title: 'Resolving Module Hierarchy', source: 'Run', value: 60 });
+
+    const { rerender } = render(
+      <StatusBar activeFileId="" cursorLine={1} cursorCol={1} />,
+    );
+
+    endProgressSession(firstId);
+    rerender(<StatusBar activeFileId="" cursorLine={1} cursorCol={1} />);
+
+    expect(screen.getByTestId('status-bar-progress-title')).toHaveTextContent('Resolving Module Hierarchy');
+    expect(screen.queryByText('Scanning RTL Sources')).not.toBeInTheDocument();
+  });
+
+  it('shows the completed progress summary when configured to keep it visible', () => {
+    vi.mocked(window.electronAPI!.config.get).mockImplementation((key: string) => {
+      if (key === 'progress.hideCompleted') {
+        return false;
+      }
+
+      return undefined;
+    });
+    const id = startProgressSession({ id: 'first', title: 'Scanning RTL Sources', source: 'Run', value: 95 });
+    endProgressSession(id);
+
+    render(
+      <StatusBar activeFileId="" cursorLine={1} cursorCol={1} />,
+    );
+
+    expect(screen.getByTestId('status-bar-progress-title')).toHaveTextContent('Done');
+    expect(screen.getByTestId('status-bar-progress-value')).toHaveTextContent('100%');
   });
 
   it('uses the file tree icon mapping for config and script files used in the editor area', () => {
@@ -218,6 +314,89 @@ describe('StatusBar', () => {
     expect(screen.queryByTestId('status-bar-language-icon')).not.toBeInTheDocument();
     expect(screen.queryByText('UTF-8')).not.toBeInTheDocument();
     expect(screen.queryByText('LF')).not.toBeInTheDocument();
+  });
+
+  it('shows notification history cards and dismisses individual records', async () => {
+    useHoverCardFakeTimers();
+    vi.mocked(window.electronAPI!.notifications.dismiss).mockResolvedValue(undefined);
+    useNotificationStore.getState().hydrate([
+      {
+        actions: [{ label: 'Mark as Read' }, { label: 'Delete' }],
+        body: 'Timing path warning',
+        createdAt: 200,
+        expiresAt: 5200,
+        id: 'warning-1',
+        level: 'warning',
+        title: 'Warning notification',
+        variant: 'actions',
+      },
+      {
+        body: 'Build info',
+        createdAt: 100,
+        expiresAt: 5100,
+        id: 'info-1',
+        level: 'info',
+        title: 'Info notification',
+        variant: 'standard',
+      },
+    ]);
+
+    try {
+      render(
+        <StatusBar activeFileId="" cursorLine={1} cursorCol={1} />,
+      );
+
+      const notificationsTrigger = screen.getByTestId('status-bar-notifications').closest('[data-slot="hover-card-trigger"]');
+      expect(notificationsTrigger).not.toBeNull();
+
+      fireEvent.pointerEnter(notificationsTrigger as HTMLElement, { pointerType: 'mouse' });
+      await advanceHoverCardOpenDelay();
+
+      expect(screen.getByTestId('status-bar-notifications-popover')).toBeInTheDocument();
+      expect(screen.getByText('Warning notification')).toBeInTheDocument();
+      expect(screen.getByText('Info notification')).toBeInTheDocument();
+      expect(screen.getByText('Warning notification').compareDocumentPosition(
+        screen.getByText('Info notification'),
+      )).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(screen.getByTestId('status-bar-notification-card-warning')).toBeInTheDocument();
+      expect(screen.getByTestId('status-bar-notifications-list')).toHaveClass('overflow-y-auto');
+      expect(screen.getByTestId('status-bar-notification-actions-warning-1')).toBeInTheDocument();
+      expect(screen.getByTestId('status-bar-notification-action-warning-1-mark-as-read')).toHaveTextContent('Mark as Read');
+      expect(screen.getByTestId('status-bar-notification-action-warning-1-delete')).toHaveTextContent('Delete');
+
+      fireEvent.click(screen.getByTestId('status-bar-notification-action-warning-1-mark-as-read'));
+      expect(window.electronAPI!.notifications.dismiss).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId('status-bar-notification-dismiss-warning-1'));
+
+      expect(window.electronAPI!.notifications.dismiss).toHaveBeenCalledWith('warning-1');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByText('Warning notification')).not.toBeInTheDocument();
+    } finally {
+      await cleanupHoverCardTimers();
+    }
+  });
+
+  it('shows an empty notification history state', async () => {
+    useHoverCardFakeTimers();
+
+    try {
+      render(
+        <StatusBar activeFileId="" cursorLine={1} cursorCol={1} />,
+      );
+
+      const notificationsTrigger = screen.getByTestId('status-bar-notifications').closest('[data-slot="hover-card-trigger"]');
+      expect(notificationsTrigger).not.toBeNull();
+
+      fireEvent.pointerEnter(notificationsTrigger as HTMLElement, { pointerType: 'mouse' });
+      await advanceHoverCardOpenDelay();
+
+      expect(screen.getByTestId('status-bar-notifications-empty')).toHaveTextContent('No notifications yet.');
+    } finally {
+      await cleanupHoverCardTimers();
+    }
   });
 
   it('adds stronger hover highlights, delays hover card open, and closes it immediately on leave', async () => {

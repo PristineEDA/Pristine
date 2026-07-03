@@ -159,6 +159,22 @@ describe('window IPC handlers', () => {
     await expect(setFloatingInfoMode({}, 'fullscreen')).rejects.toThrow('Expected floating info mode to be "collapsed", "expanded", or "detail"');
   });
 
+  it('marks the workspace as ready for startup window display coordination', () => {
+    const markWorkspaceReady = vi.fn();
+    registerWindowHandlers(
+      () => null,
+      undefined,
+      undefined,
+      undefined,
+      mockResolveCloseRequest,
+      markWorkspaceReady,
+    );
+    const handler = getHandleListener(AsyncChannels.WINDOW_MARK_WORKSPACE_READY);
+
+    expect(handler({})).toBe(true);
+    expect(markWorkspaceReady).toHaveBeenCalledTimes(1);
+  });
+
   it('emits focus, maximize, and full-screen stream events separately', () => {
     const events: Record<string, () => void> = {};
     const send = vi.fn();

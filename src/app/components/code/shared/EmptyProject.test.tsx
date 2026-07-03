@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EmptyProject } from './EmptyProject';
 
 describe('EmptyProject', () => {
@@ -31,6 +31,20 @@ describe('EmptyProject', () => {
     expect(screen.getByTestId('empty-project-summary-panel')).toBeInTheDocument();
     expect(screen.getByText('Summary')).toBeInTheDocument();
     expect(screen.getByText('Coming soon')).toBeInTheDocument();
+  });
+
+  it('calls project action callbacks from the info tab buttons', async () => {
+    const user = userEvent.setup();
+    const handleCreateProject = vi.fn();
+    const handleOpenProject = vi.fn();
+
+    render(<EmptyProject onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />);
+
+    await user.click(screen.getByTestId('empty-project-create-project'));
+    await user.click(screen.getByTestId('empty-project-open-project'));
+
+    expect(handleCreateProject).toHaveBeenCalledTimes(1);
+    expect(handleOpenProject).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the image panel visible when the wallpaper is unavailable', async () => {

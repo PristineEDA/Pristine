@@ -81,6 +81,7 @@ export function StaticCheckPanel({
             ] as const
           ).map((f) => (
             <button
+              type="button"
               key={f}
               onClick={() => setFilter(f)}
               className={`px-1.5 py-0.5 rounded transition-colors text-[10px] ${
@@ -132,6 +133,7 @@ export function StaticCheckPanel({
                   </div>
                   <div className="flex items-center gap-2 mt-1">
                     <button
+                      type="button"
                       className="flex items-center gap-1 text-ide-text-muted hover:text-ide-text transition-colors text-[10px]"
                       onClick={() => {
                         onFileOpen(item.fileId, item.file);
@@ -143,6 +145,7 @@ export function StaticCheckPanel({
                     </button>
                     {item.fixable && !isFixed && (
                       <button
+                        type="button"
                         className="flex items-center gap-1 px-1.5 py-0.5 bg-ide-accent hover:bg-ide-accent-hover text-primary-foreground rounded transition-colors text-[10px]"
                         onClick={() =>
                           setFixedIds(

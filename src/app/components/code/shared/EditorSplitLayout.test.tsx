@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceProvider, useWorkspace } from '../../../context/WorkspaceContext';
 import { EditorSplitLayout } from './EditorSplitLayout';
+import { resetProjectDialogStoreForTests, useProjectDialogStore } from './useProjectDialogStore';
 
 const editorAreaRenderCounts = new Map<string, number>();
 
@@ -25,6 +26,8 @@ vi.mock('./EditorArea', () => ({
     onTabDragStart,
     onTabDragEnd,
     onFocus,
+    onCreateProject,
+    onOpenProject,
     showDragInteractionShield,
     dragInteractionShieldTestId,
   }: any) => {
@@ -37,6 +40,8 @@ vi.mock('./EditorArea', () => ({
         <div data-testid="mock-tabs">{tabs.map((tab: { id: string }) => tab.id).join(',')}</div>
         <div data-testid="mock-preview-tabs">{tabs.filter((tab: { isPinned?: boolean }) => tab.isPinned === false).map((tab: { id: string }) => tab.id).join(',')}</div>
         {showDragInteractionShield ? <div data-testid={dragInteractionShieldTestId} /> : null}
+        {onCreateProject ? <button onClick={onCreateProject}>create-project-action</button> : null}
+        {onOpenProject ? <button onClick={onOpenProject}>open-project-action</button> : null}
         {onSplitEditor ? <button onClick={() => onSplitEditor('horizontal')}>split-editor</button> : null}
         {onSplitEditor ? <button onClick={() => onSplitEditor('vertical')}>split-editor-down</button> : null}
         {tabs.map((tab: { id: string; name: string }) => (
@@ -120,6 +125,23 @@ describe('EditorSplitLayout', () => {
   beforeEach(() => {
     testUser = userEvent.setup();
     clearEditorAreaRenderCounts();
+    resetProjectDialogStoreForTests();
+  });
+
+  it('passes empty project create and open actions into editor areas', async () => {
+    render(
+      <WorkspaceProvider>
+        <EditorSplitLayout hasOpenProject={false} />
+      </WorkspaceProvider>,
+    );
+
+    await clickText('create-project-action');
+    expect(useProjectDialogStore.getState().createProjectDialogOpen).toBe(true);
+
+    await clickText('open-project-action');
+    await waitFor(() => {
+      expect(window.electronAPI?.project.openProject).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('keeps focused editor groups free of the blue focus ring', async () => {

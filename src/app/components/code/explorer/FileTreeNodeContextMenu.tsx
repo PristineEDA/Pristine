@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import { formatShortcutLabel } from '../../../menu/shortcutLabels';
 import {
   WORKSPACE_ROOT_PATH,
@@ -292,7 +293,7 @@ export function ExplorerContextMenu({
   x: number;
   y: number;
 }) {
-  const itemRefs = useRef(new Map<number, HTMLDivElement | null>());
+  const itemRefs = useLazyRef(() => new Map<number, HTMLDivElement | null>());
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [focusedItemIndex, setFocusedItemIndex] = useState<number | null>(() => getFirstEnabledContextMenuItemIndex(items));
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number; side: 'top' | 'bottom' }>({

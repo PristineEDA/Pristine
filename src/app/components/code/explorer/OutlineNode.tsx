@@ -254,11 +254,6 @@ export const OutlineNode = memo(function OutlineNode({
     onToggleNode(nodeKey);
   }, [nodeKey, onToggleNode]);
 
-  const handleToggle = useCallback((event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    toggleNode();
-  }, [toggleNode]);
-
   if (node.type === 'kind-group') {
     const kindLabel = getOutlineKindLabel(node.kind);
     const kindTestId = sanitizeOutlineTestIdPart(node.kind);
@@ -312,6 +307,39 @@ export const OutlineNode = memo(function OutlineNode({
     );
   }
 
+  return (
+    <OutlineItemNode
+      depth={depth}
+      expanded={expanded}
+      expandedKeys={expandedKeys}
+      hasChildren={hasChildren}
+      node={node}
+      nodeKey={nodeKey}
+      onLineJump={onLineJump}
+      onToggleNode={onToggleNode}
+      pathSegments={pathSegments}
+    />
+  );
+});
+
+interface OutlineItemNodeProps extends OutlineNodeProps {
+  expanded: boolean;
+  hasChildren: boolean;
+  node: Extract<OutlineTreeNode, { type: 'item' }>;
+  nodeKey: string;
+}
+
+const OutlineItemNode = memo(function OutlineItemNode({
+  depth,
+  expanded,
+  expandedKeys,
+  hasChildren,
+  node,
+  nodeKey,
+  onLineJump,
+  onToggleNode,
+  pathSegments,
+}: OutlineItemNodeProps) {
   const { item } = node;
   const line = getOutlineLine(item);
   const kindLabel = getOutlineKindLabel(item.kind);
@@ -324,6 +352,11 @@ export const OutlineNode = memo(function OutlineNode({
       onLineJump(line);
     }
   }, [line, onLineJump]);
+
+  const handleToggle = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onToggleNode(nodeKey);
+  }, [nodeKey, onToggleNode]);
 
   const itemRow = (
     <div

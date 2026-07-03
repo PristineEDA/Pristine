@@ -16,7 +16,7 @@ describe('ImageWithFallback', () => {
 
     fireEvent.error(screen.getByAltText('Broken'));
 
-    const fallback = screen.getByAltText('Error loading image');
+    const fallback = screen.getByAltText('Failed to load');
     expect(fallback).toHaveAttribute('data-original-url', '/broken.png');
     expect(fallback.getAttribute('src')).toContain('data:image/svg+xml;base64');
   });

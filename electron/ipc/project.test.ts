@@ -43,6 +43,11 @@ const { MockBetterSqliteDatabase, mockHandle, mockSetConfigValue, mockBrowserWin
         return valueJson ? { value_json: valueJson } : undefined;
       }
 
+      if (this.sql.includes('SELECT value FROM metadata')) {
+        const value = this.database.metadata.get(String(values[0]));
+        return value ? { value } : undefined;
+      }
+
       return undefined;
     }
   }
@@ -174,19 +179,32 @@ function createSnapshot(activeView = 'explorer'): ProjectSessionSnapshot {
 describe('project IPC handlers', () => {
   let temporaryDirectory: string;
   let appliedProjectRoots: Array<string | null>;
+  let appliedWindowStates: unknown[];
+  const capturedWindowState = {
+    bounds: { height: 720, width: 1280, x: 32, y: 48 },
+    maximized: true,
+  };
 
   beforeEach(() => {
     temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'pristine-project-ipc-'));
     appliedProjectRoots = [];
+    appliedWindowStates = [];
     mockHandle.mockClear();
     mockSetConfigValue.mockClear();
     mockBrowserWindowGetAllWindows.mockReturnValue([]);
     mockDatabaseFiles.clear();
     MockBetterSqliteDatabase.filenames = [];
     MockBetterSqliteDatabase.stores.clear();
-    registerProjectHandlers(() => null, (root) => {
-      appliedProjectRoots.push(root);
-    });
+    registerProjectHandlers(
+      () => null,
+      (root) => {
+        appliedProjectRoots.push(root);
+      },
+      () => capturedWindowState,
+      (windowState) => {
+        appliedWindowStates.push(windowState);
+      },
+    );
   });
 
   afterEach(() => {
@@ -213,6 +231,13 @@ describe('project IPC handlers', () => {
 
     expect(result).toEqual({
       project: expect.objectContaining({
+        config: {
+          mgnt: 'none',
+          mode: 'rtl2gds',
+          padframe: 'QFN32',
+          process: 'ics55',
+          type: 'retroSoC',
+        },
         name: 'chip_lab',
         rootPath,
         session: expect.objectContaining({
@@ -224,6 +249,7 @@ describe('project IPC handlers', () => {
     expect(fs.existsSync(path.dirname(databasePath))).toBe(true);
     expect(MockBetterSqliteDatabase.filenames).toContain(databasePath);
     expect(appliedProjectRoots).toEqual([rootPath]);
+    expect(appliedWindowStates).toEqual([expect.objectContaining({ maximized: false })]);
     expect(mockSetConfigValue).toHaveBeenCalledWith(PROJECT_LAST_ROOT_CONFIG_KEY, rootPath);
     expect(getCurrentProjectState()).toEqual(expect.objectContaining({ rootPath }));
   });
@@ -260,12 +286,18 @@ describe('project IPC handlers', () => {
     });
     closeCurrentProjectDatabase();
     appliedProjectRoots = [];
+    appliedWindowStates = [];
     mockSetConfigValue.mockClear();
 
     await expect(openHandler({}, rootPath)).resolves.toEqual({
-      project: expect.objectContaining({ name: 'openable_project', rootPath }),
+      project: expect.objectContaining({
+        config: expect.objectContaining({ process: 'ics55' }),
+        name: 'openable_project',
+        rootPath,
+      }),
     });
     expect(appliedProjectRoots).toEqual([rootPath]);
+    expect(appliedWindowStates).toEqual([expect.objectContaining({ maximized: false })]);
     expect(mockSetConfigValue).toHaveBeenCalledWith(PROJECT_LAST_ROOT_CONFIG_KEY, rootPath);
 
     const emptyRoot = path.join(temporaryDirectory, 'empty');
@@ -294,6 +326,260 @@ describe('project IPC handlers', () => {
       session: expect.objectContaining({
         activeView: 'physical',
         panelWidths: { explorerLeftPanel: 280 },
+        windowState: capturedWindowState,
+      }),
+    }));
+  });
+
+  it('updates current project config metadata and broadcasts project changes', async () => {
+    const createHandler = getHandler(AsyncChannels.PROJECT_CREATE);
+    const updateConfigHandler = getHandler(AsyncChannels.PROJECT_UPDATE_CONFIG);
+    const getHandlerForCurrentProject = getHandler(AsyncChannels.PROJECT_GET_CURRENT);
+    const send = vi.fn();
+    mockBrowserWindowGetAllWindows.mockReturnValue([
+      {
+        isDestroyed: () => false,
+        webContents: {
+          isDestroyed: () => false,
+          send,
+        },
+      },
+    ]);
+
+    await createHandler({}, {
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      name: 'config_project',
+      padframe: 'QFN32',
+      path: temporaryDirectory,
+      process: 'ics55',
+      type: 'retroSoC',
+    });
+
+    const result = await updateConfigHandler({}, {
+      mgnt: 'item2',
+      mode: 'rtl',
+      padframe: 'QFN128',
+      process: 'gf180',
+      type: 'Custom',
+    });
+
+    expect(result).toEqual({
+      project: expect.objectContaining({
+        config: {
+          mgnt: 'item2',
+          mode: 'rtl',
+          padframe: 'QFN128',
+          process: 'gf180',
+          type: 'Custom',
+        },
+        name: 'config_project',
+      }),
+    });
+    await expect(getHandlerForCurrentProject({})).resolves.toEqual(expect.objectContaining({
+      config: {
+        mgnt: 'item2',
+        mode: 'rtl',
+        padframe: 'QFN128',
+        process: 'gf180',
+        type: 'Custom',
+      },
+    }));
+    expect(send).toHaveBeenCalledWith(StreamChannels.PROJECT_CHANGED, expect.objectContaining({
+      config: expect.objectContaining({ process: 'gf180' }),
+    }));
+  });
+
+  it('rejects project config updates when no project is open', async () => {
+    const updateConfigHandler = getHandler(AsyncChannels.PROJECT_UPDATE_CONFIG);
+
+    await expect(updateConfigHandler({}, {
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      padframe: 'QFN32',
+      process: 'ics55',
+      type: 'retroSoC',
+    })).rejects.toThrow('No project is currently open.');
+  });
+
+  it('persists side panel, bottom panel, and window session state', async () => {
+    const createHandler = getHandler(AsyncChannels.PROJECT_CREATE);
+    const flushHandler = getHandler(AsyncChannels.PROJECT_FLUSH_SESSION);
+    const getHandlerForCurrentProject = getHandler(AsyncChannels.PROJECT_GET_CURRENT);
+
+    await createHandler({}, {
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      name: 'layout_session_project',
+      padframe: 'QFN32',
+      path: temporaryDirectory,
+      process: 'ics55',
+      type: 'retroSoC',
+    });
+
+    await flushHandler({}, {
+      ...createSnapshot('explorer'),
+      bottomPanelSession: {
+        activeTab: 'terminal',
+        tabs: {
+          terminal: {
+            focusedPaneId: 'bottom-pane-2',
+            nextPaneIndex: 3,
+            panes: [
+              { content: { kind: 'tab', tab: 'terminal' }, id: 'bottom-pane-1', size: 35 },
+              { content: { kind: 'placeholder', icon: 'boxes', label: 'Placeholder B' }, id: 'bottom-pane-2', size: 65 },
+            ],
+          },
+        },
+      },
+      sidePanelSession: {
+        assistantThreadListExpanded: true,
+        assistantThreadListWidth: 360,
+        leftPrimaryTab: 'git',
+        leftSecondaryTab: 'libraries',
+        leftSplitVisible: true,
+        physicalBottomTab: 'console',
+        physicalLeftSplitVisible: true,
+        physicalLeftTab: 'constraints',
+        physicalRightSplitVisible: false,
+        physicalRightTab: 'checks',
+        rightPrimaryTab: 'outline',
+        rightSecondaryTab: 'x-propagation',
+        rightSplitVisible: true,
+      },
+      explorerTreeSession: {
+        expandedPaths: ['.', 'rtl', 'rtl/core'],
+        scrollTop: 144,
+        selectedNode: { path: 'rtl/core/cpu_top.sv', type: 'file' },
+      },
+    });
+
+    await expect(getHandlerForCurrentProject({})).resolves.toEqual(expect.objectContaining({
+      session: expect.objectContaining({
+        bottomPanelSession: expect.objectContaining({
+          activeTab: 'terminal',
+          tabs: expect.objectContaining({
+            terminal: {
+              focusedPaneId: 'bottom-pane-2',
+              nextPaneIndex: 3,
+              panes: [
+                { content: { kind: 'tab', tab: 'terminal' }, id: 'bottom-pane-1', size: 35 },
+                { content: { kind: 'placeholder', icon: 'boxes', label: 'Placeholder B' }, id: 'bottom-pane-2', size: 65 },
+              ],
+            },
+          }),
+        }),
+        sidePanelSession: {
+          assistantThreadListExpanded: true,
+          assistantThreadListWidth: 360,
+          leftPrimaryTab: 'git',
+          leftSecondaryTab: 'libraries',
+          leftSplitVisible: true,
+          physicalBottomTab: 'console',
+          physicalLeftSplitVisible: true,
+          physicalLeftTab: 'constraints',
+          physicalRightSplitVisible: false,
+          physicalRightTab: 'checks',
+          rightPrimaryTab: 'outline',
+          rightSecondaryTab: 'x-propagation',
+          rightSplitVisible: true,
+        },
+        explorerTreeSession: {
+          expandedPaths: ['.', 'rtl', 'rtl/core'],
+          scrollTop: 144,
+          selectedNode: { path: 'rtl/core/cpu_top.sv', type: 'file' },
+        },
+        windowState: capturedWindowState,
+      }),
+    }));
+  });
+
+  it('normalizes invalid persisted project layout session payloads', async () => {
+    const createHandler = getHandler(AsyncChannels.PROJECT_CREATE);
+    const flushHandler = getHandler(AsyncChannels.PROJECT_FLUSH_SESSION);
+    const getHandlerForCurrentProject = getHandler(AsyncChannels.PROJECT_GET_CURRENT);
+
+    await createHandler({}, {
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      name: 'invalid_layout_session_project',
+      padframe: 'QFN32',
+      path: temporaryDirectory,
+      process: 'ics55',
+      type: 'retroSoC',
+    });
+
+    await flushHandler({}, {
+      ...createSnapshot('explorer'),
+      bottomPanelSession: {
+        focusedPaneId: 'missing-pane',
+        nextPaneIndex: 1,
+        panes: [
+          { content: { kind: 'tab', tab: 'not-a-tab' }, id: 'bad-pane', size: -1 },
+          { content: { icon: 'unknown', kind: 'placeholder', label: '' }, id: 'bad-pane', size: 50 },
+        ],
+      },
+      sidePanelSession: {
+        assistantThreadListExpanded: 'true',
+        assistantThreadListWidth: -8,
+        leftPrimaryTab: 'bad',
+        leftSecondaryTab: 'bad',
+        leftSplitVisible: 'yes',
+        physicalBottomTab: 'bad',
+        physicalLeftSplitVisible: true,
+        physicalLeftTab: 'bad',
+        physicalRightSplitVisible: 1,
+        physicalRightTab: 'bad',
+        rightPrimaryTab: 'bad',
+        rightSecondaryTab: 'bad',
+        rightSplitVisible: true,
+      },
+      explorerTreeSession: {
+        expandedPaths: ['rtl', 42, '', 'rtl'],
+        scrollTop: Number.NaN,
+        selectedNode: { path: 'rtl/core', type: 'root' },
+      },
+      windowState: {
+        bounds: { height: 10, width: 10, x: 'bad', y: 0 },
+        maximized: true,
+      },
+    });
+
+    await expect(getHandlerForCurrentProject({})).resolves.toEqual(expect.objectContaining({
+      session: expect.objectContaining({
+        bottomPanelSession: {
+          activeTab: 'terminal',
+          tabs: expect.objectContaining({
+            terminal: {
+              focusedPaneId: 'bad-pane',
+              nextPaneIndex: 2,
+              panes: [
+                { content: { kind: 'empty' }, id: 'bad-pane', size: 100 },
+              ],
+            },
+          }),
+        },
+        sidePanelSession: {
+          assistantThreadListExpanded: false,
+          assistantThreadListWidth: 140,
+          leftPrimaryTab: 'explorer',
+          leftSecondaryTab: 'hierarchy',
+          leftSplitVisible: false,
+          physicalBottomTab: 'reports',
+          physicalLeftSplitVisible: true,
+          physicalLeftTab: 'layout',
+          physicalRightSplitVisible: false,
+          physicalRightTab: 'layers',
+          rightPrimaryTab: 'ai',
+          rightSecondaryTab: 'module-info',
+          rightSplitVisible: true,
+        },
+        explorerTreeSession: {
+          expandedPaths: ['.', 'rtl'],
+          scrollTop: 0,
+          selectedNode: null,
+        },
+        windowState: capturedWindowState,
       }),
     }));
   });
@@ -348,8 +634,10 @@ describe('project IPC handlers', () => {
     closeCurrentProjectDatabase();
     mockSetConfigValue.mockClear();
 
-    expect(tryOpenStartupProject(rootPath, applyProjectRoot)).toEqual(expect.objectContaining({ rootPath }));
+    const applyWindowState = vi.fn();
+    expect(tryOpenStartupProject(rootPath, applyProjectRoot, applyWindowState)).toEqual(expect.objectContaining({ rootPath }));
     expect(applyProjectRoot).toHaveBeenCalledWith(rootPath);
+    expect(applyWindowState).toHaveBeenCalledWith(expect.objectContaining({ maximized: false }));
 
     applyProjectRoot.mockClear();
     expect(tryOpenStartupProject(null, applyProjectRoot)).toBeNull();

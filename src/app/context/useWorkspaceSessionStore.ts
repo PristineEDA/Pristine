@@ -8,6 +8,7 @@ import {
 import type { ProjectSessionSnapshot, ProjectState } from '../../../types/project';
 
 type ProjectPanelWidthUpdater = number | ((current: number | undefined) => number);
+export type WorkspaceBootstrapStatus = 'bootstrapping' | 'ready';
 
 interface WorkspaceSessionSnapshotFields {
   activeView: CodeView;
@@ -18,6 +19,7 @@ interface WorkspaceSessionSnapshotFields {
 
 interface WorkspaceSessionState extends WorkspaceSessionSnapshotFields {
   currentProject: ProjectState | null;
+  workspaceBootstrapStatus: WorkspaceBootstrapStatus;
   workspaceTreeRefreshToken: number;
 }
 
@@ -27,6 +29,7 @@ interface WorkspaceSessionActions {
   hydrateProjectSession: (snapshot: ProjectSessionSnapshot | null | undefined) => void;
   resetProjectSession: () => void;
   setActiveView: (view: CodeView) => void;
+  setWorkspaceBootstrapStatus: (status: WorkspaceBootstrapStatus) => void;
   setCurrentProject: (project: ProjectState | null) => void;
   setMainContentView: (view: MainContentView) => void;
   setPanelStateForView: (view: CodeView, nextState: Partial<PanelVisibilityState>) => void;
@@ -53,6 +56,7 @@ function createDefaultSessionState(): WorkspaceSessionState {
     currentProject: null,
     mainContentView: 'code',
     panelStateByView: clonePanelStateByView(DEFAULT_PANEL_STATE_BY_CODE_VIEW),
+    workspaceBootstrapStatus: 'bootstrapping',
     panelWidths: {},
     workspaceTreeRefreshToken: 0,
   };
@@ -108,6 +112,10 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionStore>((set, get)
 
   setActiveView: (view) => {
     set((state) => (state.activeView === view ? state : { activeView: view }));
+  },
+
+  setWorkspaceBootstrapStatus: (status) => {
+    set((state) => (state.workspaceBootstrapStatus === status ? state : { workspaceBootstrapStatus: status }));
   },
 
   setCurrentProject: (project) => {

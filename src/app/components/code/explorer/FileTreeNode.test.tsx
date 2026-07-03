@@ -227,6 +227,43 @@ describe('FileTreeNode', () => {
     expect(onGitDiffOpen).toHaveBeenCalledWith('rtl/core/cpu_top.v', 'cpu_top.v');
   });
 
+  it('aggregates first-level child repository git states on folder and file nodes', () => {
+    render(
+      <FileTreeNode
+        node={{
+          id: 'ip',
+          path: 'ip',
+          name: 'ip',
+          type: 'folder',
+          children: [{
+            id: 'ip/src/child_core.sv',
+            path: 'ip/src/child_core.sv',
+            name: 'child_core.sv',
+            type: 'file',
+            hasLoadedChildren: true,
+            isLoading: false,
+          }],
+          hasLoadedChildren: true,
+          isLoading: false,
+        }}
+        depth={0}
+        activeFileId=""
+        onFileOpen={vi.fn()}
+        onFilePreview={vi.fn()}
+        expandedFolders={new Set(['ip'])}
+        onToggleFolder={vi.fn()}
+        gitPathStates={{
+          'ip/generated/new_child.sv': 'created',
+          'ip/src/child_core.sv': 'modified',
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('file-tree-git-indicator-created-ip')).toBeInTheDocument();
+    expect(screen.getByTestId('file-tree-git-indicator-modified-ip')).toBeInTheDocument();
+    expect(screen.getByTestId('file-tree-git-indicator-modified-ip_src_child_core_sv')).toBeInTheDocument();
+  });
+
   it('omits git diff from context menus for non-modified files', () => {
     render(
       <FileTreeNode

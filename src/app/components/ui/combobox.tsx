@@ -5,6 +5,7 @@ import { Check, ChevronsUpDown } from "lucide-react"
 import { createPortal } from "react-dom"
 
 import { cn } from "@/lib/utils"
+import { useLazyRef } from "@/hooks/use-lazy-ref"
 import { Button } from "@/app/components/ui/button"
 import {
   Command,
@@ -121,12 +122,13 @@ function Combobox({
   value,
   getOptionTestId,
 }: ComboboxProps) {
+  const listId = React.useId()
   const [open, setOpen] = React.useState(false)
   const [previewPlacement, setPreviewPlacement] = React.useState<ComboboxPreviewPlacement | null>(null)
   const [previewedOptionValue, setPreviewedOptionValue] = React.useState<string | null>(null)
   const [previewVisible, setPreviewVisible] = React.useState(false)
   const listRef = React.useRef<HTMLDivElement | null>(null)
-  const optionRefs = React.useRef(new Map<string, HTMLElement>())
+  const optionRefs = useLazyRef(() => new Map<string, HTMLElement>())
   const previewPaneRef = React.useRef<HTMLDivElement | null>(null)
   const selectedOption = options.find((option) => option.value === value) ?? null
   const previewedOption = options.find((option) => option.value === previewedOptionValue) ?? null
@@ -307,6 +309,7 @@ function Combobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-controls={listId}
           data-testid={triggerTestId}
           className={cn("flex w-full min-w-0 max-w-full justify-between overflow-hidden font-normal", triggerClassName)}
         >
@@ -325,6 +328,7 @@ function Combobox({
           <Command className="min-w-0">
             <CommandInput placeholder={searchPlaceholder} onFocus={hideOptionPreview} />
             <div
+              id={listId}
               data-combobox-list={listTestId}
               data-testid={listTestId}
               className="max-h-[300px] overflow-y-auto overscroll-contain"

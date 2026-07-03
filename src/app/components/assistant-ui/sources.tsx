@@ -69,6 +69,7 @@ export type SourceProps = Omit<BadgeProps, "asChild"> &
   };
 
 function Source({
+  children,
   className,
   variant,
   size,
@@ -92,7 +93,9 @@ function Source({
         target={target}
         rel={rel}
         {...(props as ComponentProps<"a">)}
-      />
+      >
+        {children}
+      </a>
     </Badge>
   );
 }

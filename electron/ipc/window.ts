@@ -9,6 +9,7 @@ export function registerWindowHandlers(
   setFloatingInfoWindowExpanded: (expanded: boolean) => boolean = () => false,
   setFloatingInfoWindowMode: (mode: FloatingInfoWindowMode) => boolean = () => false,
   resolveCloseRequest: (requestId: number, decision: WindowCloseDecision) => boolean = () => false,
+  markWorkspaceReady: () => void = () => {},
 ): void {
   ipcMain.on(SyncChannels.WINDOW_IS_MAXIMIZED, (event) => {
     const win = getMainWindow();
@@ -60,6 +61,11 @@ export function registerWindowHandlers(
     const win = getMainWindow();
     if (!win) return false;
     win.close();
+    return true;
+  });
+
+  ipcMain.handle(AsyncChannels.WINDOW_MARK_WORKSPACE_READY, () => {
+    markWorkspaceReady();
     return true;
   });
 

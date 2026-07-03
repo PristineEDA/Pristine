@@ -4,6 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceProvider, useWorkspace } from './WorkspaceContext';
 import { resetWorkspaceSessionStoreForTests, useWorkspaceSessionStore } from './useWorkspaceSessionStore';
+import { resetBottomPanelStoreForTests, useBottomPanelStore } from '../components/code/explorer/useBottomPanelStore';
+import { resetSidePanelSessionStoreForTests, useSidePanelSessionStore } from '../components/code/explorer/useSidePanelSessionStore';
+import { resetExplorerTreeSessionStoreForTests, useExplorerTreeSessionStore } from '../workspace/useExplorerTreeSessionStore';
+import {
+  WSL_TERMINAL_SESSION_KEY,
+  resetWslDevelopmentEnvironmentStoreForTests,
+  useWslDevelopmentEnvironmentStore,
+} from '../wsl/useWslDevelopmentEnvironmentStore';
 import type { ProjectState } from '../../../types/project';
 
 const undoActionRun = vi.fn(() => Promise.resolve());
@@ -40,6 +48,7 @@ function WorkspaceHarness() {
       <div data-testid="clipboard-path">{workspace.workspaceClipboard?.sourcePath ?? ''}</div>
       <div data-testid="workspace-tree-refresh-token">{workspace.workspaceTreeRefreshToken}</div>
       <div data-testid="current-project-name">{workspace.currentProject?.name ?? ''}</div>
+      <div data-testid="workspace-bootstrap-status">{workspace.workspaceBootstrapStatus}</div>
       <div data-testid="panel-widths">{JSON.stringify(workspace.projectPanelWidths)}</div>
 
       <button onClick={() => workspace.setActiveView('simulation')}>set-view</button>
@@ -135,6 +144,13 @@ function getProjectChangedHandler() {
 
 function createProjectState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
+    config: {
+      mgnt: 'none',
+      mode: 'rtl2gds',
+      padframe: 'QFN32',
+      process: 'ics55',
+      type: 'retroSoC',
+    },
     name: 'chip_lab',
     rootPath: 'C:\\Projects\\chip_lab',
     session: null,
@@ -145,6 +161,10 @@ function createProjectState(overrides: Partial<ProjectState> = {}): ProjectState
 describe('WorkspaceContext', () => {
   beforeEach(() => {
     resetWorkspaceSessionStoreForTests();
+    resetBottomPanelStoreForTests();
+    resetSidePanelSessionStoreForTests();
+    resetExplorerTreeSessionStoreForTests();
+    resetWslDevelopmentEnvironmentStoreForTests();
     testUser = userEvent.setup();
     vi.clearAllMocks();
     undoActionRun.mockClear();
@@ -557,6 +577,54 @@ describe('WorkspaceContext', () => {
     expect(window.electronAPI?.resolveCloseRequest).toHaveBeenCalledWith(7, 'proceed');
   });
 
+  it('deactivates WSL and restores transient terminal pane before flushing on app close', async () => {
+    vi.mocked(window.electronAPI!.project.getCurrentProject).mockResolvedValueOnce(createProjectState());
+    useWslDevelopmentEnvironmentStore.getState().setWslDevelopmentEnvironmentStatus('running');
+    useBottomPanelStore.getState().showWslTerminalInPane('bottom-pane-1');
+
+    render(
+      <WorkspaceProvider>
+        <WorkspaceHarness />
+      </WorkspaceProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-project-name')).toHaveTextContent('chip_lab');
+      expect(vi.mocked(window.electronAPI!.onCloseRequested).mock.calls.length).toBeGreaterThan(0);
+    });
+
+    const closeRequestCalls = vi.mocked(window.electronAPI!.onCloseRequested).mock.calls;
+    const closeRequestHandler = closeRequestCalls[closeRequestCalls.length - 1]?.[0];
+
+    await act(async () => {
+      closeRequestHandler?.({ requestId: 11, action: 'quit' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(window.electronAPI!.wsl.stopPristineEdaEnvironment).toHaveBeenCalled();
+      expect(window.electronAPI!.project.flushSession).toHaveBeenCalled();
+      expect(window.electronAPI?.resolveCloseRequest).toHaveBeenCalledWith(11, 'proceed');
+    });
+
+    expect(window.electronAPI!.terminal.kill).not.toHaveBeenCalledWith(WSL_TERMINAL_SESSION_KEY);
+    expect(useBottomPanelStore.getState().wslPaneOverride).toBeNull();
+    expect(useBottomPanelStore.getState().panes[0]?.content).toEqual({ kind: 'tab', tab: 'terminal' });
+    expect(window.electronAPI!.project.flushSession).toHaveBeenCalledWith(expect.objectContaining({
+      bottomPanelSession: expect.objectContaining({
+        activeTab: 'terminal',
+        tabs: expect.objectContaining({
+          terminal: expect.objectContaining({
+            panes: [
+              { content: { kind: 'tab', tab: 'terminal' }, id: 'bottom-pane-1', size: 100 },
+            ],
+          }),
+        }),
+      }),
+    }));
+  });
+
   it('keeps the window-close listener registered once across workspace file updates', async () => {
     vi.mocked(window.electronAPI!.onCloseRequested).mockClear();
 
@@ -657,6 +725,39 @@ describe('WorkspaceContext', () => {
         panelWidths: {
           physicalRightPanel: 424,
         },
+        bottomPanelSession: {
+          activeTab: 'terminal',
+          tabs: {
+            terminal: {
+              focusedPaneId: 'bottom-pane-2',
+              nextPaneIndex: 3,
+              panes: [
+                { content: { kind: 'tab', tab: 'terminal' }, id: 'bottom-pane-1', size: 40 },
+                { content: { kind: 'placeholder', icon: 'file', label: 'Placeholder A' }, id: 'bottom-pane-2', size: 60 },
+              ],
+            },
+          },
+        },
+        sidePanelSession: {
+          assistantThreadListExpanded: true,
+          assistantThreadListWidth: 384,
+          leftPrimaryTab: 'git',
+          leftSecondaryTab: 'libraries',
+          leftSplitVisible: true,
+          physicalBottomTab: 'console',
+          physicalLeftSplitVisible: true,
+          physicalLeftTab: 'constraints',
+          physicalRightSplitVisible: false,
+          physicalRightTab: 'checks',
+          rightPrimaryTab: 'outline',
+          rightSecondaryTab: 'x-propagation',
+          rightSplitVisible: true,
+        },
+        explorerTreeSession: {
+          expandedPaths: ['.', 'rtl', 'rtl/core'],
+          scrollTop: 96,
+          selectedNode: { path: 'rtl/core/cpu_top.sv', type: 'file' },
+        },
         version: 1,
       },
     });
@@ -671,6 +772,90 @@ describe('WorkspaceContext', () => {
       expect(screen.getByTestId('panel-widths')).toHaveTextContent('"physicalRightPanel":424');
     });
     expect(useWorkspaceSessionStore.getState().mainContentView).toBe('workflow');
+    expect(useSidePanelSessionStore.getState()).toMatchObject({
+      assistantThreadListExpanded: true,
+      assistantThreadListWidth: 384,
+      leftPrimaryTab: 'git',
+      leftSecondaryTab: 'libraries',
+      leftSplitVisible: true,
+      physicalBottomTab: 'console',
+      physicalLeftSplitVisible: true,
+      physicalLeftTab: 'constraints',
+      physicalRightSplitVisible: false,
+      physicalRightTab: 'checks',
+      rightPrimaryTab: 'outline',
+      rightSecondaryTab: 'x-propagation',
+      rightSplitVisible: true,
+    });
+    expect(useExplorerTreeSessionStore.getState()).toMatchObject({
+      expandedPaths: ['.', 'rtl', 'rtl/core'],
+      scrollTop: 96,
+      selectedNode: { path: 'rtl/core/cpu_top.sv', type: 'file' },
+    });
+    expect(useBottomPanelStore.getState()).toMatchObject({
+      activeTab: 'terminal',
+      focusedPaneId: 'bottom-pane-2',
+      nextPaneIndex: 3,
+      panes: [
+        { content: { kind: 'tab', tab: 'terminal' }, id: 'bottom-pane-1', size: 40 },
+        { content: { kind: 'placeholder', icon: 'file', label: 'Placeholder A' }, id: 'bottom-pane-2', size: 60 },
+      ],
+    });
+  });
+
+  it('marks the workspace ready after initial project bootstrap completes without a project', async () => {
+    vi.mocked(window.electronAPI!.project.getCurrentProject).mockResolvedValueOnce(null);
+
+    render(
+      <WorkspaceProvider>
+        <WorkspaceHarness />
+      </WorkspaceProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workspace-bootstrap-status')).toHaveTextContent('ready');
+      expect(window.electronAPI!.markWorkspaceReady).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByTestId('current-project-name')).toHaveTextContent('');
+  });
+
+  it('hydrates the initial project session before marking the workspace ready', async () => {
+    vi.mocked(window.electronAPI!.project.getCurrentProject).mockResolvedValueOnce(createProjectState({
+      session: {
+        activeTabId: '',
+        activeView: 'physical',
+        editorGroups: [],
+        editorLayout: null,
+        focusedGroupId: null,
+        mainContentView: 'code',
+        panelStateByView: {
+          ...useWorkspaceSessionStore.getState().panelStateByView,
+          physical: {
+            showLeftPanel: true,
+            showBottomPanel: false,
+            showRightPanel: true,
+          },
+        },
+        panelWidths: {
+          physicalLeftPanel: 340,
+        },
+        version: 1,
+      },
+    }));
+
+    render(
+      <WorkspaceProvider>
+        <WorkspaceHarness />
+      </WorkspaceProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workspace-bootstrap-status')).toHaveTextContent('ready');
+      expect(screen.getByTestId('current-project-name')).toHaveTextContent('chip_lab');
+      expect(screen.getByTestId('active-view')).toHaveTextContent('physical');
+      expect(screen.getByTestId('panel-widths')).toHaveTextContent('"physicalLeftPanel":340');
+      expect(window.electronAPI!.markWorkspaceReady).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('flushes a session snapshot composed from the Zustand session store and editor state', async () => {
@@ -690,6 +875,21 @@ describe('WorkspaceContext', () => {
     await clickHarnessButton('set-view');
     await clickHarnessButton('show-left');
     await clickHarnessButton('set-left-width');
+    act(() => {
+      useExplorerTreeSessionStore.getState().setExpandedFolders(['rtl', 'rtl/core']);
+      useExplorerTreeSessionStore.getState().setSelectedNode({ path: 'rtl/core/reg_file.v', type: 'file' });
+      useExplorerTreeSessionStore.getState().setScrollTop(88);
+      useSidePanelSessionStore.getState().setExplorerLeftTab('git');
+      useSidePanelSessionStore.getState().setExplorerLeftSplitVisible(true);
+      useSidePanelSessionStore.getState().setExplorerRightTab('references');
+      useSidePanelSessionStore.getState().setExplorerRightSplitVisible(true);
+      useBottomPanelStore.getState().splitFocusedPane(600);
+      useBottomPanelStore.getState().updatePaneContent('bottom-pane-2', {
+        kind: 'placeholder',
+        icon: 'boxes',
+        label: 'Placeholder B',
+      });
+    });
     await clickHarnessButton('flush-project-session');
 
     await waitFor(() => {
@@ -701,8 +901,40 @@ describe('WorkspaceContext', () => {
       activeView: 'simulation',
       editorGroups: expect.any(Array),
       mainContentView: 'code',
+      bottomPanelSession: expect.objectContaining({
+        activeTab: 'terminal',
+        tabs: expect.objectContaining({
+          terminal: expect.objectContaining({
+            focusedPaneId: 'bottom-pane-2',
+            panes: [
+              { content: { kind: 'tab', tab: 'terminal' }, id: 'bottom-pane-1', size: 50 },
+              { content: { kind: 'placeholder', icon: 'boxes', label: 'Placeholder B' }, id: 'bottom-pane-2', size: 50 },
+            ],
+          }),
+        }),
+      }),
       panelWidths: {
         explorerLeftPanel: 360,
+      },
+      sidePanelSession: {
+        assistantThreadListExpanded: false,
+        assistantThreadListWidth: 140,
+        leftPrimaryTab: 'git',
+        leftSecondaryTab: 'hierarchy',
+        leftSplitVisible: true,
+        physicalBottomTab: 'reports',
+        physicalLeftSplitVisible: false,
+        physicalLeftTab: 'layout',
+        physicalRightSplitVisible: false,
+        physicalRightTab: 'layers',
+        rightPrimaryTab: 'references',
+        rightSecondaryTab: 'module-info',
+        rightSplitVisible: true,
+      },
+      explorerTreeSession: {
+        expandedPaths: ['.', 'rtl', 'rtl/core'],
+        scrollTop: 88,
+        selectedNode: { path: 'rtl/core/reg_file.v', type: 'file' },
       },
       version: 1,
     }));

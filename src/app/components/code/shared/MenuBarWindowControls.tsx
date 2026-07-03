@@ -29,6 +29,7 @@ export function MenuBarWindowControls({
   return (
     <>
       <button
+        type="button"
         data-testid="window-control-minimize"
         className={controlClassName}
         style={interactiveStyle}
@@ -37,6 +38,7 @@ export function MenuBarWindowControls({
         <Minus size={14} />
       </button>
       <button
+        type="button"
         data-testid="window-control-maximize"
         aria-label={maximizeLabel}
         title={maximizeLabel}
@@ -47,6 +49,7 @@ export function MenuBarWindowControls({
         {isMaximized ? <Copy size={13} /> : <Square size={12} />}
       </button>
       <button
+        type="button"
         data-testid="window-control-close"
         className={closeControlClassName}
         style={interactiveStyle}

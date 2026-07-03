@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { type WorkspaceRevealRequest, useWorkspaceTree } from './useWorkspaceTree';
+import { resetExplorerTreeSessionStoreForTests } from './useExplorerTreeSessionStore';
 
 function findNodeByPath(node: { path: string; children?: Array<{ path: string; children?: unknown[] }> } | null | undefined, targetPath: string): any {
   if (!node) {
@@ -30,6 +31,7 @@ describe('useWorkspaceTree', () => {
     const electronApi = window.electronAPI!;
 
     vi.clearAllMocks();
+    resetExplorerTreeSessionStoreForTests();
 
     vi.mocked(electronApi.fs.exists).mockResolvedValue(true);
     vi.mocked(electronApi.fs.readDir).mockImplementation(async (dirPath: string) => {
@@ -55,6 +57,43 @@ describe('useWorkspaceTree', () => {
     expect(result.current.workspaceAvailable).toBe(false);
     expect(result.current.treeNodes).toEqual([]);
     expect(window.electronAPI!.fs.readDir).not.toHaveBeenCalled();
+  });
+
+  it('hides Pristine metadata directories only at the workspace root', async () => {
+    vi.mocked(window.electronAPI!.fs.readDir).mockImplementation(async (dirPath: string) => {
+      if (dirPath === '.') {
+        return [
+          { name: '.pristine', isDirectory: true, isFile: false },
+          { name: '.prstine', isDirectory: true, isFile: false },
+          { name: 'rtl', isDirectory: true, isFile: false },
+        ];
+      }
+
+      if (dirPath === 'rtl') {
+        return [
+          { name: '.pristine', isDirectory: true, isFile: false },
+          { name: 'core.sv', isDirectory: false, isFile: true },
+        ];
+      }
+
+      return [];
+    });
+
+    const { result } = renderHook(() => useWorkspaceTree());
+
+    await waitFor(() => {
+      expect(result.current.workspaceAvailable).toBe(true);
+      expect(result.current.treeNodes[0]?.children?.map((child) => child.path)).toEqual(['rtl']);
+    });
+
+    act(() => {
+      result.current.toggleFolder('rtl');
+    });
+
+    await waitFor(() => {
+      expect(findNodeByPath(result.current.treeNodes[0], 'rtl/.pristine')).not.toBeNull();
+      expect(findNodeByPath(result.current.treeNodes[0], 'rtl/core.sv')).not.toBeNull();
+    });
   });
 
   it('keeps the expanded folder state stable when revealing within already expanded ancestors', async () => {
