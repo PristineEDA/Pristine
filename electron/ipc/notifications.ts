@@ -164,10 +164,36 @@ function getNotificationBody(record: NotificationRecord): string {
     : record.title;
 }
 
+function encodeFileUrlPathSegments(value: string): string {
+  return value
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function getNotificationIconFileUrl(filePath: string): string {
+  if (process.platform !== 'win32') {
+    return pathToFileURL(filePath).toString();
+  }
+
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  const drivePathMatch = /^([A-Za-z]:)\/(.*)$/.exec(normalizedPath);
+  if (drivePathMatch) {
+    return `file:///${drivePathMatch[1]}/${encodeFileUrlPathSegments(drivePathMatch[2])}`;
+  }
+
+  if (normalizedPath.startsWith('//')) {
+    const withoutPrefix = normalizedPath.slice(2);
+    return `file://${encodeFileUrlPathSegments(withoutPrefix)}`;
+  }
+
+  return pathToFileURL(filePath).toString();
+}
+
 function createWindowsActionToastXml(record: NotificationRecord): string {
   const logoPath = getAppLogoPath(64);
   const appLogoImage = logoPath
-    ? `<image placement="appLogoOverride" src="${escapeXml(pathToFileURL(logoPath).toString())}" hint-crop="circle" />`
+    ? `<image placement="appLogoOverride" src="${escapeXml(getNotificationIconFileUrl(logoPath))}" hint-crop="circle" />`
     : '';
   const actions = (record.actions ?? DEFAULT_ACTION_NOTIFICATION_ACTIONS)
     .map((action) => (
