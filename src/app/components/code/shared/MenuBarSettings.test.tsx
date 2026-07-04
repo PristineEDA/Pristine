@@ -150,6 +150,7 @@ describe('MenuBar settings', () => {
 
     expect(screen.getByTestId('settings-splash-scrim-value')).toHaveTextContent('50%');
     expect(screen.getByTestId('settings-splash-preview')).toBeVisible();
+    expect(screen.getByTestId('settings-splash-preview')).toHaveClass('aspect-video', 'w-full');
     expect(screen.getByTestId('settings-splash-preview-background')).toHaveAttribute(
       'src',
       './generated/splash/splash-background.png',

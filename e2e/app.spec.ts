@@ -4265,6 +4265,9 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
   await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
   await expect(window.getByTestId('settings-splash-preview')).toBeVisible();
+  const splashPreviewBox = await window.getByTestId('settings-splash-preview').boundingBox();
+  expect(splashPreviewBox).not.toBeNull();
+  expect(Math.abs((splashPreviewBox!.width / splashPreviewBox!.height) - (16 / 9))).toBeLessThan(0.03);
   await expect(window.getByTestId('settings-splash-preview-background')).toHaveAttribute(
     'src',
     './generated/splash/splash-background.png',

@@ -600,7 +600,7 @@ function SplashScrimPreview({ intensity }: { intensity: number }) {
 
   return (
     <div
-      className="relative h-36 overflow-hidden rounded-md border border-border/75 bg-ide-tab-bg"
+      className="relative aspect-video w-full overflow-hidden rounded-md border border-border/75 bg-ide-tab-bg"
       data-testid="settings-splash-preview"
     >
       <img
