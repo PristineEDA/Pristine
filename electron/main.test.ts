@@ -561,6 +561,8 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/public[\\/]splash\.html$/), {
       query: {
         backgroundColor: '#2F6680',
+        splashProgressPanelOpacity: '0.45',
+        splashProgressVisible: 'true',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },
@@ -814,6 +816,8 @@ describe('electron main entry', () => {
       configValues: {
         'workbench.colorThemeKind': 'light',
         'workbench.splashScrimIntensity': 0.42,
+        'workbench.splashProgressVisible': false,
+        'workbench.splashProgressPanelOpacity': 0.72,
         'workbench.startupBackgroundColor': '#112233',
         'workbench.splashBackgroundColor': '#223344',
       },
@@ -831,6 +835,8 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
       query: {
         backgroundColor: '#223344',
+        splashProgressPanelOpacity: '0.72',
+        splashProgressVisible: 'false',
         splashScrimIntensity: '0.42',
         themeKind: 'light',
       },
@@ -842,6 +848,8 @@ describe('electron main entry', () => {
       platform: 'win32',
       configValues: {
         'workbench.splashScrimIntensity': 'invalid',
+        'workbench.splashProgressVisible': 'invalid',
+        'workbench.splashProgressPanelOpacity': 'invalid',
       },
     });
 
@@ -850,6 +858,8 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
       query: {
         backgroundColor: '#2F6680',
+        splashProgressPanelOpacity: '0.45',
+        splashProgressVisible: 'true',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },
@@ -885,6 +895,8 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/dist[\\/]splash\.html$/), {
       query: {
         backgroundColor: '#2F6680',
+        splashProgressPanelOpacity: '0.45',
+        splashProgressVisible: 'true',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },

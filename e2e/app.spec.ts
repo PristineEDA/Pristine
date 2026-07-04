@@ -605,7 +605,7 @@ async function waitForStartupWindow(
   return startupWindow;
 }
 
-async function expectSplashVisuals(page: Page, options: { scrimIntensity?: string } = {}) {
+async function expectSplashVisuals(page: Page, options: { progressPanelOpacity?: string; scrimIntensity?: string } = {}) {
   const backgroundImage = page.getByTestId('splash-background-image');
   const brandLogo = page.getByTestId('splash-brand-logo');
   const brandTitle = page.getByTestId('splash-brand-title');
@@ -619,6 +619,8 @@ async function expectSplashVisuals(page: Page, options: { scrimIntensity?: strin
   await expect(page.locator('html')).toHaveAttribute('data-splash-assets-ready', 'true');
   await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '1');
   await expect(progress).toBeVisible();
+  await expect(progress).toHaveAttribute('data-progress-visible', 'true');
+  await expect(progress).toHaveAttribute('data-progress-panel-opacity', options.progressPanelOpacity ?? '0.45');
   await expect(progressBar).toBeVisible();
 
   await expect.poll(
@@ -4285,11 +4287,23 @@ test('settings dialog supports subpage navigation and global search', async () =
     return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
   })).toBe(true);
   await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '1.00');
+  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('45%');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '0.45');
   await window.getByTestId('settings-splash-scrim-slider').getByRole('slider').focus();
   await window.keyboard.press('Home');
   await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('0%');
   await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.00');
   await expect.poll(async () => readConfigValue(window, 'workbench.splashScrimIntensity')).toBe(0);
+  await window.getByTestId('settings-splash-progress-panel-opacity-slider').getByRole('slider').focus();
+  await window.keyboard.press('End');
+  await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('100%');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '1.00');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressPanelOpacity')).toBe(1);
+  await setSwitchChecked(window.getByTestId('settings-splash-progress-visible-switch'), false);
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toBeHidden();
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressVisible')).toBe(false);
 
   await openSettingsPage(window, 'editor');
   await expect(window.getByTestId('settings-nav-editor')).toHaveAttribute('aria-current', 'page');

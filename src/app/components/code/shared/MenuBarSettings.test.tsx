@@ -140,6 +140,8 @@ describe('MenuBar settings', () => {
     const user = userEvent.setup();
     mockPersistedSettingsConfig({
       splashScrimIntensity: 0.5,
+      splashProgressPanelOpacity: 0.45,
+      splashProgressVisible: true,
     });
 
     renderMenuBar();
@@ -160,6 +162,9 @@ describe('MenuBar settings', () => {
       './generated/logo/logo-32.png',
     );
     expect(screen.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.50');
+    expect(screen.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+    expect(screen.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveTextContent('45%');
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '0.45');
 
     const sliderThumb = within(screen.getByTestId('settings-splash-scrim-slider')).getByRole('slider');
     sliderThumb.focus();
@@ -171,6 +176,23 @@ describe('MenuBar settings', () => {
     });
     expect(screen.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.00');
     expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashScrimIntensity', 0);
+
+    const progressOpacitySlider = within(screen.getByTestId('settings-splash-progress-panel-opacity-slider')).getByRole('slider');
+    progressOpacitySlider.focus();
+    fireEvent.keyDown(progressOpacitySlider, { key: 'End' });
+    fireEvent.keyUp(progressOpacitySlider, { key: 'End' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveTextContent('100%');
+    });
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '1.00');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressPanelOpacity', 1);
+
+    await user.click(screen.getByTestId('settings-splash-progress-visible-switch'));
+    expect(screen.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveClass('hidden');
+    expect(screen.getByTestId('settings-splash-progress-panel-opacity-slider')).toHaveAttribute('data-disabled');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressVisible', false);
   });
 
   it('navigates settings subpages and searches across pages', async () => {

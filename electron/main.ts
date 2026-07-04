@@ -34,6 +34,8 @@ const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
 const WORKBENCH_COLOR_THEME_KIND_CONFIG_KEY = 'workbench.colorThemeKind';
 const WORKBENCH_FLOATING_INFO_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.floatingInfoBackgroundColor';
 const WORKBENCH_SPLASH_SCRIM_INTENSITY_CONFIG_KEY = 'workbench.splashScrimIntensity';
+const WORKBENCH_SPLASH_PROGRESS_VISIBLE_CONFIG_KEY = 'workbench.splashProgressVisible';
+const WORKBENCH_SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY = 'workbench.splashProgressPanelOpacity';
 const WORKBENCH_SPLASH_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.splashBackgroundColor';
 const WORKBENCH_STARTUP_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.startupBackgroundColor';
 const AUTH_CALLBACK_PROTOCOL = 'pristine';
@@ -48,6 +50,8 @@ const DEFAULT_STARTUP_BACKGROUND_COLOR = '#121314';
 const DEFAULT_SPLASH_BACKGROUND_COLOR = '#2F6680';
 const DEFAULT_FLOATING_INFO_BACKGROUND_COLOR = '#121314';
 const DEFAULT_SPLASH_SCRIM_INTENSITY = 1;
+const DEFAULT_SPLASH_PROGRESS_VISIBLE = true;
+const DEFAULT_SPLASH_PROGRESS_PANEL_OPACITY = 0.45;
 const SPLASH_ASSETS_READY_SCRIPT = `(() => {
   const waitForAssetsReady = window.__pristineSplashAssetsReady;
   return typeof waitForAssetsReady === 'function' ? waitForAssetsReady() : Promise.resolve(false);
@@ -243,6 +247,21 @@ function parseSplashScrimIntensity(value: unknown): number {
 
 function getConfiguredSplashScrimIntensity(): number {
   return parseSplashScrimIntensity(getConfigValue(WORKBENCH_SPLASH_SCRIM_INTENSITY_CONFIG_KEY));
+}
+
+function getConfiguredSplashProgressVisible(): boolean {
+  const value = getConfigValue(WORKBENCH_SPLASH_PROGRESS_VISIBLE_CONFIG_KEY);
+  return typeof value === 'boolean' ? value : DEFAULT_SPLASH_PROGRESS_VISIBLE;
+}
+
+function parseSplashProgressPanelOpacity(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
+    : DEFAULT_SPLASH_PROGRESS_PANEL_OPACITY;
+}
+
+function getConfiguredSplashProgressPanelOpacity(): number {
+  return parseSplashProgressPanelOpacity(getConfigValue(WORKBENCH_SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY));
 }
 
 function createRendererSurfaceQuery(
@@ -689,6 +708,8 @@ function createSplashWindow(): BrowserWindow {
   const splashLoadPromise = Promise.resolve(window.loadFile(getSplashHtmlPath(), {
     query: createRendererSurfaceQuery(backgroundColor, {
       splashScrimIntensity: String(getConfiguredSplashScrimIntensity()),
+      splashProgressVisible: String(getConfiguredSplashProgressVisible()),
+      splashProgressPanelOpacity: String(getConfiguredSplashProgressPanelOpacity()),
     }),
   })).catch(() => undefined);
   splashVisiblePromise = showSplashWindowWhenReady(window, splashLoadPromise, splashReadyToShowPromise);

@@ -103,6 +103,8 @@ const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
 const NOTIFICATION_DISMISS_SECONDS_CONFIG_KEY = 'notifications.dismissSeconds';
 const PROGRESS_HIDE_COMPLETED_CONFIG_KEY = 'progress.hideCompleted';
 const SPLASH_SCRIM_INTENSITY_CONFIG_KEY = 'workbench.splashScrimIntensity';
+const SPLASH_PROGRESS_VISIBLE_CONFIG_KEY = 'workbench.splashProgressVisible';
+const SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY = 'workbench.splashProgressPanelOpacity';
 export const EDA_WSL_UBUNTU_DISTRO_CONFIG_KEY = 'eda.wslUbuntuDistro';
 const DEFAULT_NOTIFICATION_DISMISS_SECONDS = 5;
 const MIN_NOTIFICATION_DISMISS_SECONDS = 1;
@@ -111,6 +113,11 @@ const DEFAULT_SPLASH_SCRIM_INTENSITY = 1;
 const MIN_SPLASH_SCRIM_INTENSITY = 0;
 const MAX_SPLASH_SCRIM_INTENSITY = 1;
 const SPLASH_SCRIM_INTENSITY_STEP = 0.01;
+const DEFAULT_SPLASH_PROGRESS_VISIBLE = true;
+const DEFAULT_SPLASH_PROGRESS_PANEL_OPACITY = 0.45;
+const MIN_SPLASH_PROGRESS_PANEL_OPACITY = 0;
+const MAX_SPLASH_PROGRESS_PANEL_OPACITY = 1;
+const SPLASH_PROGRESS_PANEL_OPACITY_STEP = 0.01;
 const THEME_PICKER_LAYOUT_MODE_CONFIG_KEY = 'workbench.themePickerLayoutMode';
 const settingsSectionClassName = 'overflow-hidden rounded-md border border-border/75 bg-background/35';
 const settingsSectionTitleClassName = 'text-[13px] font-medium';
@@ -235,6 +242,8 @@ export interface MenuBarSettingsState {
   notificationDismissSeconds: number;
   progressHideCompleted: boolean;
   splashScrimIntensity: number;
+  splashProgressVisible: boolean;
+  splashProgressPanelOpacity: number;
   wslUbuntuDistro: WslUbuntuDistro;
   themeId: string;
   themePickerLayoutMode: ThemePickerLayoutMode;
@@ -290,6 +299,11 @@ function getConfiguredProgressHideCompleted(): boolean {
   return window.electronAPI?.config.get(PROGRESS_HIDE_COMPLETED_CONFIG_KEY) !== false;
 }
 
+function getConfiguredSplashProgressVisible(): boolean {
+  const value = window.electronAPI?.config.get(SPLASH_PROGRESS_VISIBLE_CONFIG_KEY);
+  return typeof value === 'boolean' ? value : DEFAULT_SPLASH_PROGRESS_VISIBLE;
+}
+
 function parseSplashScrimIntensity(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_SPLASH_SCRIM_INTENSITY;
@@ -305,6 +319,28 @@ function getConfiguredSplashScrimIntensity(): number {
 
 function formatSplashScrimIntensity(value: number): string {
   return `${Math.round(parseSplashScrimIntensity(value) * 100)}%`;
+}
+
+function parseSplashProgressPanelOpacity(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_SPLASH_PROGRESS_PANEL_OPACITY;
+  }
+
+  const roundedValue = Math.round(value / SPLASH_PROGRESS_PANEL_OPACITY_STEP) * SPLASH_PROGRESS_PANEL_OPACITY_STEP;
+  return Math.min(
+    MAX_SPLASH_PROGRESS_PANEL_OPACITY,
+    Math.max(MIN_SPLASH_PROGRESS_PANEL_OPACITY, roundedValue),
+  );
+}
+
+function getConfiguredSplashProgressPanelOpacity(): number {
+  return parseSplashProgressPanelOpacity(
+    window.electronAPI?.config.get(SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY),
+  );
+}
+
+function formatSplashProgressPanelOpacity(value: number): string {
+  return `${Math.round(parseSplashProgressPanelOpacity(value) * 100)}%`;
 }
 
 function getSplashScrimBackground(intensity: number): string {
@@ -457,6 +493,8 @@ function getPersistedSettingsState(): MenuBarSettingsState {
     notificationDismissSeconds: getConfiguredNotificationDismissSeconds(),
     progressHideCompleted: getConfiguredProgressHideCompleted(),
     splashScrimIntensity: getConfiguredSplashScrimIntensity(),
+    splashProgressVisible: getConfiguredSplashProgressVisible(),
+    splashProgressPanelOpacity: getConfiguredSplashProgressPanelOpacity(),
     wslUbuntuDistro: getConfiguredWslUbuntuDistro(),
     themeId: getConfiguredThemeId(),
     themePickerLayoutMode: getConfiguredThemePickerLayoutMode(),
@@ -595,8 +633,17 @@ function SettingsSliderSection({
   );
 }
 
-function SplashScrimPreview({ intensity }: { intensity: number }) {
+function SplashScrimPreview({
+  intensity,
+  progressPanelOpacity,
+  progressVisible,
+}: {
+  intensity: number;
+  progressPanelOpacity: number;
+  progressVisible: boolean;
+}) {
   const parsedIntensity = parseSplashScrimIntensity(intensity);
+  const parsedProgressPanelOpacity = parseSplashProgressPanelOpacity(progressPanelOpacity);
 
   return (
     <div
@@ -628,10 +675,18 @@ function SplashScrimPreview({ intensity }: { intensity: number }) {
         />
         <span className="text-[12px] font-semibold leading-4 text-white">Pristine</span>
       </div>
-      <div className="absolute inset-x-4 bottom-4 grid gap-2">
-        <div className="flex items-center justify-between text-[11px] leading-4 text-white/75">
+      <div
+        className={cn(
+          'absolute inset-x-4 bottom-4 grid gap-2 rounded-md border border-white/20 px-3 py-2 shadow-lg backdrop-blur',
+          !progressVisible && 'hidden',
+        )}
+        data-progress-panel-opacity={parsedProgressPanelOpacity.toFixed(2)}
+        data-testid="settings-splash-preview-progress-panel"
+        style={{ backgroundColor: `rgba(10, 14, 22, ${parsedProgressPanelOpacity})` }}
+      >
+        <div className="flex items-center justify-between text-[11px] leading-4 text-white/82">
           <span>Restoring workspace</span>
-          <span>{formatSplashScrimIntensity(0.38)}</span>
+          <span>38%</span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-white/25">
           <div className="h-full w-[38%] rounded-full bg-[#2acb7d] shadow-[0_0_14px_rgba(42,203,125,0.36)]" />
@@ -966,6 +1021,22 @@ export function useMenuBarSettingsController() {
     void window.electronAPI?.config.set(SPLASH_SCRIM_INTENSITY_CONFIG_KEY, nextValue);
   };
 
+  const handleSplashProgressVisibleChange = (checked: boolean) => {
+    patchSettingsState({ splashProgressVisible: checked });
+    void window.electronAPI?.config.set(SPLASH_PROGRESS_VISIBLE_CONFIG_KEY, checked);
+  };
+
+  const handleSplashProgressPanelOpacityChange = (value: number[]) => {
+    const nextValue = parseSplashProgressPanelOpacity(value[0] ?? settingsState.splashProgressPanelOpacity);
+    patchSettingsState({ splashProgressPanelOpacity: nextValue });
+  };
+
+  const handleSplashProgressPanelOpacityCommit = (value: number[]) => {
+    const nextValue = parseSplashProgressPanelOpacity(value[0] ?? settingsState.splashProgressPanelOpacity);
+    patchSettingsState({ splashProgressPanelOpacity: nextValue });
+    void window.electronAPI?.config.set(SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY, nextValue);
+  };
+
   const handleWslUbuntuDistroChange = (value: string) => {
     const nextDistro = parseWslUbuntuDistro(value);
     patchSettingsState({ wslUbuntuDistro: nextDistro });
@@ -1167,6 +1238,9 @@ export function useMenuBarSettingsController() {
     handleProgressHideCompletedChange,
     handleSplashScrimIntensityChange,
     handleSplashScrimIntensityCommit,
+    handleSplashProgressVisibleChange,
+    handleSplashProgressPanelOpacityChange,
+    handleSplashProgressPanelOpacityCommit,
     handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
@@ -1228,6 +1302,9 @@ export function MenuBarSettingsDialogs({
     handleProgressHideCompletedChange,
     handleSplashScrimIntensityChange,
     handleSplashScrimIntensityCommit,
+    handleSplashProgressVisibleChange,
+    handleSplashProgressPanelOpacityChange,
+    handleSplashProgressPanelOpacityCommit,
     handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
@@ -1393,7 +1470,7 @@ export function MenuBarSettingsDialogs({
       pageId: 'appearance',
       title: 'Splash overlay intensity',
       description: 'Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch.',
-      keywords: ['appearance', 'splash', 'startup', 'overlay', 'scrim', 'intensity'],
+      keywords: ['appearance', 'splash', 'startup', 'overlay', 'scrim', 'intensity', 'progress'],
       element: (
         <SettingsSliderSection
           title="Splash overlay intensity"
@@ -1419,7 +1496,58 @@ export function MenuBarSettingsDialogs({
                 {formatSplashScrimIntensity(settingsState.splashScrimIntensity)}
               </span>
             </div>
-            <SplashScrimPreview intensity={settingsState.splashScrimIntensity} />
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border/60 bg-muted/25 px-3 py-2">
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-[12px] font-medium">Show splash progress</p>
+                <p
+                  className="text-[11px] text-muted-foreground"
+                  data-testid="settings-splash-progress-visible-switch-description"
+                >
+                  Show startup progress on the splash screen.
+                </p>
+              </div>
+              <Switch
+                checked={settingsState.splashProgressVisible}
+                className="shrink-0"
+                data-testid="settings-splash-progress-visible-switch"
+                onCheckedChange={handleSplashProgressVisibleChange}
+              />
+            </div>
+            <div className="space-y-2 rounded-md border border-border/60 bg-muted/25 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 space-y-0.5">
+                  <p className="text-[12px] font-medium">Progress panel opacity</p>
+                  <p
+                    className="text-[11px] text-muted-foreground"
+                    data-testid="settings-splash-progress-panel-opacity-description"
+                  >
+                    Adjust the glass background behind startup progress.
+                  </p>
+                </div>
+                <span
+                  className="min-w-12 shrink-0 text-right text-[13px] font-medium text-foreground"
+                  data-testid="settings-splash-progress-panel-opacity-value"
+                >
+                  {formatSplashProgressPanelOpacity(settingsState.splashProgressPanelOpacity)}
+                </span>
+              </div>
+              <Slider
+                aria-label="Progress panel opacity"
+                data-testid="settings-splash-progress-panel-opacity-slider"
+                disabled={!settingsState.splashProgressVisible}
+                min={MIN_SPLASH_PROGRESS_PANEL_OPACITY}
+                max={MAX_SPLASH_PROGRESS_PANEL_OPACITY}
+                step={SPLASH_PROGRESS_PANEL_OPACITY_STEP}
+                value={[settingsState.splashProgressPanelOpacity]}
+                onValueChange={handleSplashProgressPanelOpacityChange}
+                onValueCommit={handleSplashProgressPanelOpacityCommit}
+              />
+            </div>
+            <SplashScrimPreview
+              intensity={settingsState.splashScrimIntensity}
+              progressPanelOpacity={settingsState.splashProgressPanelOpacity}
+              progressVisible={settingsState.splashProgressVisible}
+            />
           </div>
         </SettingsSliderSection>
       ),
@@ -1802,6 +1930,9 @@ export function MenuBarSettingsDialogs({
     handleProgressHideCompletedChange,
     handleSplashScrimIntensityChange,
     handleSplashScrimIntensityCommit,
+    handleSplashProgressVisibleChange,
+    handleSplashProgressPanelOpacityChange,
+    handleSplashProgressPanelOpacityCommit,
     handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
