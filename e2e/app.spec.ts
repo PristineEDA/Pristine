@@ -616,6 +616,7 @@ async function expectSplashVisuals(page: Page, options: { scrimIntensity?: strin
   await expect(backgroundImage).toBeVisible();
   await expect(brandLogo).toBeVisible();
   await expect(brandTitle).toHaveText('Pristine');
+  await expect(page.locator('html')).toHaveAttribute('data-splash-assets-ready', 'true');
   await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '1');
   await expect(progress).toBeVisible();
   await expect(progressBar).toBeVisible();

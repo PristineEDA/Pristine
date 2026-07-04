@@ -14,6 +14,7 @@ type BrowserWindowInstance = {
   webContents: {
     send: Mock<(channel: string, ...args: unknown[]) => void>;
     isDestroyed: Mock<() => boolean>;
+    executeJavaScript: Mock<(script: string, userGesture?: boolean) => Promise<unknown>>;
   };
   on: Mock<(event: string, handler: (...args: unknown[]) => void) => BrowserWindowInstance>;
   once: Mock<(event: string, handler: (...args: unknown[]) => void) => BrowserWindowInstance>;
@@ -50,6 +51,9 @@ const mocks = vi.hoisted(() => {
     ['userData', `${mockAppDataPath}/Pristine`],
     ['sessionData', `${mockAppDataPath}/Pristine/session-data`],
   ]);
+  const mockExecuteJavaScript = vi.fn<(script: string, userGesture?: boolean) => Promise<unknown>>(
+    () => Promise.resolve(true),
+  );
 
   function createMockNativeImage(
     kind: string,
@@ -88,6 +92,7 @@ const mocks = vi.hoisted(() => {
     webContents = {
       send: vi.fn(),
       isDestroyed: vi.fn(() => false),
+      executeJavaScript: vi.fn((script: string, userGesture?: boolean) => mockExecuteJavaScript(script, userGesture)),
     };
     private visible: boolean;
     private maximized = false;
@@ -226,6 +231,7 @@ const mocks = vi.hoisted(() => {
     mockTryOpenStartupProject: vi.fn(),
     mockHandleAuthCallbackUrl: vi.fn<(url: string) => Promise<void>>(() => Promise.resolve()),
     mockIsAuthProtocolUrl: vi.fn<(value: string) => boolean>((value: string) => value.startsWith('pristine://')),
+    mockExecuteJavaScript,
   };
 });
 
@@ -321,6 +327,7 @@ async function importMain(options?: {
   userDataPath?: string;
   configValues?: Record<string, unknown>;
   singleInstanceLock?: boolean;
+  splashExecuteJavaScript?: (script: string, userGesture?: boolean) => Promise<unknown>;
 }) {
   vi.resetModules();
   mocks.appHandlers.clear();
@@ -346,6 +353,10 @@ async function importMain(options?: {
   mocks.mockWriteShortcutLink.mockClear();
   mocks.mockExistsSync.mockReset();
   mocks.mockExistsSync.mockImplementation(() => true);
+  mocks.mockExecuteJavaScript.mockReset();
+  mocks.mockExecuteJavaScript.mockImplementation(
+    options?.splashExecuteJavaScript ?? (() => Promise.resolve(true)),
+  );
   mocks.mockCreateFromDataURL.mockClear();
   mocks.mockCreateFromBuffer.mockClear();
   mocks.mockCreateFromPath.mockClear();
@@ -544,11 +555,12 @@ describe('electron main entry', () => {
       frame: false,
       resizable: false,
       skipTaskbar: true,
-      backgroundColor: '#191A1B',
+      show: false,
+      backgroundColor: '#2F6680',
     });
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/public[\\/]splash\.html$/), {
       query: {
-        backgroundColor: '#191A1B',
+        backgroundColor: '#2F6680',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },
@@ -578,6 +590,7 @@ describe('electron main entry', () => {
     expect(mainWindow.loadFile).not.toHaveBeenCalled();
     expect(mainWindow.show).not.toHaveBeenCalled();
 
+    splashWindow.emit('ready-to-show');
     mainWindow.emit('ready-to-show');
     await vi.advanceTimersByTimeAsync(1000);
     expect(mainWindow.show).not.toHaveBeenCalled();
@@ -585,6 +598,7 @@ describe('electron main entry', () => {
 
     await vi.runAllTimersAsync();
     await Promise.resolve();
+    expect(splashWindow.show).toHaveBeenCalledTimes(1);
     expect(mainWindow.show).toHaveBeenCalledTimes(1);
     expect(splashWindow.close).toHaveBeenCalledTimes(1);
     expect(mocks.mockSetApplicationMenu).not.toHaveBeenCalled();
@@ -592,6 +606,66 @@ describe('electron main entry', () => {
     mainWindow.emit('closed');
     expect(getMainWindow?.()).toBeNull();
     expect(mocks.mockDisposeAllTerminalSessions).not.toHaveBeenCalled();
+  });
+
+  it('shows the hidden splash window after splash assets are ready', async () => {
+    const { browserWindowInstances } = await importMain({
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+    });
+    const splashWindow = browserWindowInstances[0];
+
+    expect(splashWindow.options).toMatchObject({
+      show: false,
+      backgroundColor: '#2F6680',
+    });
+    expect(splashWindow.webContents.executeJavaScript).toHaveBeenCalledWith(
+      expect.stringContaining('__pristineSplashAssetsReady'),
+      true,
+    );
+    expect(splashWindow.show).not.toHaveBeenCalled();
+
+    splashWindow.emit('ready-to-show');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(splashWindow.show).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to showing the splash after the asset ready timeout and keeps the visible duration', async () => {
+    const { browserWindowInstances, markWorkspaceReady } = await importMain({
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+      splashExecuteJavaScript: () => new Promise(() => undefined),
+    });
+    const splashWindow = browserWindowInstances[0];
+    const mainWindow = browserWindowInstances[1];
+
+    splashWindow.emit('ready-to-show');
+    mainWindow.emit('ready-to-show');
+    markWorkspaceReady?.();
+
+    await vi.advanceTimersByTimeAsync(1499);
+    await Promise.resolve();
+
+    expect(splashWindow.show).not.toHaveBeenCalled();
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+
+    expect(splashWindow.show).toHaveBeenCalledTimes(1);
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2999);
+    await Promise.resolve();
+
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+
+    expect(mainWindow.show).toHaveBeenCalledTimes(1);
+    expect(splashWindow.close).toHaveBeenCalledTimes(1);
   });
 
   it('updates tray icon and tooltip for unread notifications', async () => {
@@ -672,6 +746,7 @@ describe('electron main entry', () => {
     const splashWindow = browserWindowInstances[0];
     const mainWindow = browserWindowInstances[1];
 
+    splashWindow.emit('ready-to-show');
     mainWindow.emit('ready-to-show');
     await vi.advanceTimersByTimeAsync(1000);
     markWorkspaceReady?.();
@@ -702,6 +777,7 @@ describe('electron main entry', () => {
     expect(mainWindow.maximize).not.toHaveBeenCalled();
     expect(mainWindow.show).not.toHaveBeenCalled();
 
+    splashWindow.emit('ready-to-show');
     mainWindow.emit('ready-to-show');
     await vi.advanceTimersByTimeAsync(1000);
     markWorkspaceReady?.();
@@ -773,7 +849,7 @@ describe('electron main entry', () => {
 
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
       query: {
-        backgroundColor: '#191A1B',
+        backgroundColor: '#2F6680',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },
@@ -808,7 +884,7 @@ describe('electron main entry', () => {
     expect(mainWindow.loadURL).not.toHaveBeenCalled();
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/dist[\\/]splash\.html$/), {
       query: {
-        backgroundColor: '#191A1B',
+        backgroundColor: '#2F6680',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },

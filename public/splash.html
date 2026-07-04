@@ -7,7 +7,7 @@
     <style>
       :root {
         color-scheme: dark;
-        --splash-background: #191a1b;
+        --splash-background: #2f6680;
         --splash-foreground: rgba(255, 255, 255, 0.92);
         --splash-muted: rgba(255, 255, 255, 0.66);
         --splash-progress-track: rgba(255, 255, 255, 0.22);
@@ -195,6 +195,88 @@
           document.documentElement.style.background = backgroundColor;
         }
 
+        const waitForImageLoad = (image) => new Promise((resolve) => {
+          if (!image) {
+            resolve(false);
+            return;
+          }
+
+          if (image.complete && image.naturalWidth > 0) {
+            resolve(true);
+            return;
+          }
+
+          const complete = () => {
+            resolve(Boolean(image.complete && image.naturalWidth > 0));
+          };
+
+          image.addEventListener('load', complete, { once: true });
+          image.addEventListener('error', complete, { once: true });
+        });
+
+        const waitForImageReady = async (image) => {
+          const loaded = await waitForImageLoad(image);
+          if (!loaded) {
+            return false;
+          }
+
+          if (typeof image.decode === 'function') {
+            try {
+              await image.decode();
+            } catch {
+              return false;
+            }
+          }
+
+          return Boolean(image.complete && image.naturalWidth > 0);
+        };
+
+        const waitForPaintOpportunity = () => new Promise((resolve) => {
+          let settled = false;
+          const complete = () => {
+            if (settled) {
+              return;
+            }
+
+            settled = true;
+            resolve();
+          };
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(complete);
+          });
+          setTimeout(complete, 120);
+        });
+
+        const waitForSplashAssetsReady = () => new Promise((resolve) => {
+          const waitForDomReady = () => {
+            const backgroundImage = document.querySelector('[data-testid="splash-background-image"]');
+            const brandLogo = document.querySelector('[data-testid="splash-brand-logo"]');
+
+            Promise.all([
+              waitForImageReady(backgroundImage),
+              waitForImageReady(brandLogo),
+            ]).then(async ([backgroundReady, logoReady]) => {
+              const assetsReady = Boolean(backgroundReady && logoReady);
+              if (assetsReady) {
+                await waitForPaintOpportunity();
+              }
+
+              document.documentElement.dataset.splashAssetsReady = String(assetsReady);
+              resolve(assetsReady);
+            });
+          };
+
+          if (document.readyState === 'loading') {
+            window.addEventListener('DOMContentLoaded', waitForDomReady, { once: true });
+            return;
+          }
+
+          waitForDomReady();
+        });
+
+        window.__pristineSplashAssetsReady = waitForSplashAssetsReady;
+
         window.addEventListener('DOMContentLoaded', () => {
           const scrim = document.querySelector('[data-testid="splash-scrim"]');
           const progress = document.querySelector('[data-testid="splash-progress"]');
@@ -230,6 +312,7 @@
           };
 
           requestAnimationFrame(updateProgress);
+          void waitForSplashAssetsReady();
         });
       })();
     </script>

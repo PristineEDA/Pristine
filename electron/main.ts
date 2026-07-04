@@ -27,6 +27,7 @@ import { ensureWindowsNotificationShortcut } from './windowsNotificationIdentity
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MINIMUM_SPLASH_DURATION_MS = 3000;
+const SPLASH_ASSETS_READY_TIMEOUT_MS = 1500;
 const WORKSPACE_READY_TIMEOUT_MS = 1500;
 const CLOSE_ACTION_CONFIG_KEY = 'window.closeActionPreference';
 const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
@@ -44,9 +45,13 @@ const FLOATING_INFO_EXPANDED_HEIGHT = 96;
 const FLOATING_INFO_DETAIL_WIDTH = 360;
 const FLOATING_INFO_DETAIL_HEIGHT = 520;
 const DEFAULT_STARTUP_BACKGROUND_COLOR = '#121314';
-const DEFAULT_SPLASH_BACKGROUND_COLOR = '#191A1B';
+const DEFAULT_SPLASH_BACKGROUND_COLOR = '#2F6680';
 const DEFAULT_FLOATING_INFO_BACKGROUND_COLOR = '#121314';
 const DEFAULT_SPLASH_SCRIM_INTENSITY = 1;
+const SPLASH_ASSETS_READY_SCRIPT = `(() => {
+  const waitForAssetsReady = window.__pristineSplashAssetsReady;
+  return typeof waitForAssetsReady === 'function' ? waitForAssetsReady() : Promise.resolve(false);
+})()`;
 
 type ThemeKind = 'light' | 'dark';
 
@@ -62,6 +67,7 @@ let pendingAuthCallbackUrl: string | null = null;
 let pendingProjectWindowState: ProjectWindowState | null = null;
 let resolveWorkspaceReady: (() => void) | null = null;
 let workspaceReadyPromise: Promise<void> = Promise.resolve();
+let splashVisiblePromise: Promise<void> = Promise.resolve();
 let trayUnreadNotificationCount = 0;
 
 app.setName(APP_DISPLAY_NAME);
@@ -665,7 +671,7 @@ function createSplashWindow(): BrowserWindow {
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
-    show: true,
+    show: false,
     center: true,
     skipTaskbar: true,
     backgroundColor,
@@ -679,11 +685,13 @@ function createSplashWindow(): BrowserWindow {
     },
   });
 
-  window.loadFile(getSplashHtmlPath(), {
+  const splashReadyToShowPromise = waitForWindowReady(window);
+  const splashLoadPromise = Promise.resolve(window.loadFile(getSplashHtmlPath(), {
     query: createRendererSurfaceQuery(backgroundColor, {
       splashScrimIntensity: String(getConfiguredSplashScrimIntensity()),
     }),
-  });
+  })).catch(() => undefined);
+  splashVisiblePromise = showSplashWindowWhenReady(window, splashLoadPromise, splashReadyToShowPromise);
   window.on('closed', () => {
     if (splashWindow === window) {
       splashWindow = null;
@@ -766,6 +774,52 @@ function waitForMinimumSplashDuration(): Promise<void> {
   });
 }
 
+function waitForSplashAssetsReady(window: BrowserWindow, loadPromise: Promise<unknown>): Promise<void> {
+  return loadPromise
+    .then(async () => {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) {
+        return;
+      }
+
+      await window.webContents.executeJavaScript(SPLASH_ASSETS_READY_SCRIPT, true);
+    })
+    .catch(() => undefined);
+}
+
+function waitForSplashFirstFrameReady(
+  window: BrowserWindow,
+  loadPromise: Promise<unknown>,
+  readyToShowPromise: Promise<void>,
+): Promise<void> {
+  return Promise.race([
+    Promise.all([
+      waitForSplashAssetsReady(window, loadPromise),
+      readyToShowPromise,
+    ]).then(() => undefined),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, SPLASH_ASSETS_READY_TIMEOUT_MS);
+    }),
+  ]);
+}
+
+function showSplashWindowWhenReady(
+  window: BrowserWindow,
+  loadPromise: Promise<unknown>,
+  readyToShowPromise: Promise<void>,
+): Promise<void> {
+  return waitForSplashFirstFrameReady(window, loadPromise, readyToShowPromise).then(() => {
+    if (splashWindow !== window || window.isDestroyed()) {
+      return;
+    }
+
+    window.show();
+  });
+}
+
+function waitForVisibleSplashDuration(): Promise<void> {
+  return splashVisiblePromise.then(() => waitForMinimumSplashDuration());
+}
+
 function waitForWorkspaceReady(): Promise<void> {
   return Promise.race([
     workspaceReadyPromise,
@@ -776,7 +830,7 @@ function waitForWorkspaceReady(): Promise<void> {
 }
 
 function showMainWindowWhenReady(window: BrowserWindow, splash: BrowserWindow): void {
-  void Promise.all([waitForWindowReady(window), waitForMinimumSplashDuration(), waitForWorkspaceReady()]).then(() => {
+  void Promise.all([waitForWindowReady(window), waitForVisibleSplashDuration(), waitForWorkspaceReady()]).then(() => {
     if (mainWindow === window) {
       applyPendingProjectWindowVisibilityState(window);
       window.show();
