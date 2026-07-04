@@ -605,16 +605,18 @@ async function waitForStartupWindow(
   return startupWindow;
 }
 
-async function expectSplashVisuals(page: Page) {
+async function expectSplashVisuals(page: Page, options: { scrimIntensity?: string } = {}) {
   const backgroundImage = page.getByTestId('splash-background-image');
   const brandLogo = page.getByTestId('splash-brand-logo');
   const brandTitle = page.getByTestId('splash-brand-title');
+  const scrim = page.getByTestId('splash-scrim');
   const progress = page.getByTestId('splash-progress');
   const progressBar = page.getByTestId('splash-progress-bar');
 
   await expect(backgroundImage).toBeVisible();
   await expect(brandLogo).toBeVisible();
   await expect(brandTitle).toHaveText('Pristine');
+  await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '1');
   await expect(progress).toBeVisible();
   await expect(progressBar).toBeVisible();
 
@@ -4259,6 +4261,31 @@ test('settings dialog supports subpage navigation and global search', async () =
   await openSettingsPage(window, 'appearance');
   await expect(window.getByTestId('settings-nav-appearance')).toHaveAttribute('aria-current', 'page');
   await expect(window.getByTestId('settings-theme-combobox')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
+  await expect(window.getByTestId('settings-splash-preview')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-background')).toHaveAttribute(
+    'src',
+    './generated/splash/splash-background.png',
+  );
+  await expect(window.getByTestId('settings-splash-preview-logo')).toHaveAttribute(
+    'src',
+    './generated/logo/logo-32.png',
+  );
+  await expect.poll(async () => window.getByTestId('settings-splash-preview-background').evaluate((element) => {
+    const image = element as { complete?: boolean; naturalWidth?: number };
+    return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+  })).toBe(true);
+  await expect.poll(async () => window.getByTestId('settings-splash-preview-logo').evaluate((element) => {
+    const image = element as { complete?: boolean; naturalWidth?: number };
+    return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+  })).toBe(true);
+  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '1.00');
+  await window.getByTestId('settings-splash-scrim-slider').getByRole('slider').focus();
+  await window.keyboard.press('Home');
+  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('0%');
+  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.00');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashScrimIntensity')).toBe(0);
 
   await openSettingsPage(window, 'editor');
   await expect(window.getByTestId('settings-nav-editor')).toHaveAttribute('aria-current', 'page');

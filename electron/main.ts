@@ -32,6 +32,7 @@ const CLOSE_ACTION_CONFIG_KEY = 'window.closeActionPreference';
 const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
 const WORKBENCH_COLOR_THEME_KIND_CONFIG_KEY = 'workbench.colorThemeKind';
 const WORKBENCH_FLOATING_INFO_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.floatingInfoBackgroundColor';
+const WORKBENCH_SPLASH_SCRIM_INTENSITY_CONFIG_KEY = 'workbench.splashScrimIntensity';
 const WORKBENCH_SPLASH_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.splashBackgroundColor';
 const WORKBENCH_STARTUP_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.startupBackgroundColor';
 const AUTH_CALLBACK_PROTOCOL = 'pristine';
@@ -45,6 +46,7 @@ const FLOATING_INFO_DETAIL_HEIGHT = 520;
 const DEFAULT_STARTUP_BACKGROUND_COLOR = '#121314';
 const DEFAULT_SPLASH_BACKGROUND_COLOR = '#191A1B';
 const DEFAULT_FLOATING_INFO_BACKGROUND_COLOR = '#121314';
+const DEFAULT_SPLASH_SCRIM_INTENSITY = 1;
 
 type ThemeKind = 'light' | 'dark';
 
@@ -227,10 +229,24 @@ function getConfiguredWindowBackgroundColor(configKey: string, fallback: string)
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-function createRendererSurfaceQuery(backgroundColor: string): Record<string, string> {
+function parseSplashScrimIntensity(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
+    : DEFAULT_SPLASH_SCRIM_INTENSITY;
+}
+
+function getConfiguredSplashScrimIntensity(): number {
+  return parseSplashScrimIntensity(getConfigValue(WORKBENCH_SPLASH_SCRIM_INTENSITY_CONFIG_KEY));
+}
+
+function createRendererSurfaceQuery(
+  backgroundColor: string,
+  extraQuery?: Record<string, string>,
+): Record<string, string> {
   return {
     backgroundColor,
     themeKind: getConfiguredThemeKind(),
+    ...extraQuery,
   };
 }
 
@@ -664,7 +680,9 @@ function createSplashWindow(): BrowserWindow {
   });
 
   window.loadFile(getSplashHtmlPath(), {
-    query: createRendererSurfaceQuery(backgroundColor),
+    query: createRendererSurfaceQuery(backgroundColor, {
+      splashScrimIntensity: String(getConfiguredSplashScrimIntensity()),
+    }),
   });
   window.on('closed', () => {
     if (splashWindow === window) {

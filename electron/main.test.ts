@@ -549,6 +549,7 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/public[\\/]splash\.html$/), {
       query: {
         backgroundColor: '#191A1B',
+        splashScrimIntensity: '1',
         themeKind: 'dark',
       },
     });
@@ -736,6 +737,7 @@ describe('electron main entry', () => {
       platform: 'win32',
       configValues: {
         'workbench.colorThemeKind': 'light',
+        'workbench.splashScrimIntensity': 0.42,
         'workbench.startupBackgroundColor': '#112233',
         'workbench.splashBackgroundColor': '#223344',
       },
@@ -753,7 +755,27 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
       query: {
         backgroundColor: '#223344',
+        splashScrimIntensity: '0.42',
         themeKind: 'light',
+      },
+    });
+  });
+
+  it('falls back to the default splash scrim intensity for invalid config values', async () => {
+    const { browserWindowInstances } = await importMain({
+      platform: 'win32',
+      configValues: {
+        'workbench.splashScrimIntensity': 'invalid',
+      },
+    });
+
+    const splashWindow = browserWindowInstances[0];
+
+    expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
+      query: {
+        backgroundColor: '#191A1B',
+        splashScrimIntensity: '1',
+        themeKind: 'dark',
       },
     });
   });
@@ -787,6 +809,7 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/dist[\\/]splash\.html$/), {
       query: {
         backgroundColor: '#191A1B',
+        splashScrimIntensity: '1',
         themeKind: 'dark',
       },
     });

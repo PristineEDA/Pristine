@@ -12,6 +12,12 @@
         --splash-muted: rgba(255, 255, 255, 0.66);
         --splash-progress-track: rgba(255, 255, 255, 0.22);
         --splash-progress-fill: #2acb7d;
+        --splash-scrim-top-alpha: 0.46;
+        --splash-scrim-mid-alpha: 0.24;
+        --splash-scrim-bottom-alpha: 0.62;
+        --splash-scrim-left-alpha: 0.52;
+        --splash-scrim-center-alpha: 0.08;
+        --splash-scrim-right-alpha: 0.34;
         background: var(--splash-background);
       }
 
@@ -56,8 +62,18 @@
         position: absolute;
         inset: 0;
         background:
-          linear-gradient(180deg, rgba(4, 8, 14, 0.46), rgba(4, 8, 14, 0.24) 42%, rgba(4, 8, 14, 0.62)),
-          linear-gradient(90deg, rgba(4, 8, 14, 0.52), rgba(4, 8, 14, 0.08) 54%, rgba(4, 8, 14, 0.34));
+          linear-gradient(
+            180deg,
+            rgba(4, 8, 14, var(--splash-scrim-top-alpha)),
+            rgba(4, 8, 14, var(--splash-scrim-mid-alpha)) 42%,
+            rgba(4, 8, 14, var(--splash-scrim-bottom-alpha))
+          ),
+          linear-gradient(
+            90deg,
+            rgba(4, 8, 14, var(--splash-scrim-left-alpha)),
+            rgba(4, 8, 14, var(--splash-scrim-center-alpha)) 54%,
+            rgba(4, 8, 14, var(--splash-scrim-right-alpha))
+          );
       }
 
       .brand {
@@ -141,6 +157,30 @@
         const params = new URLSearchParams(window.location.search);
         const backgroundColor = params.get('backgroundColor');
         const themeKind = params.get('themeKind');
+        const scrimBaseAlpha = {
+          top: 0.46,
+          mid: 0.24,
+          bottom: 0.62,
+          left: 0.52,
+          center: 0.08,
+          right: 0.34,
+        };
+        const parseScrimIntensity = (value) => {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
+        };
+        const scrimIntensity = parseScrimIntensity(params.get('splashScrimIntensity'));
+        const applyScrimIntensity = (intensity) => {
+          Object.entries(scrimBaseAlpha).forEach(([key, alpha]) => {
+            document.documentElement.style.setProperty(
+              `--splash-scrim-${key}-alpha`,
+              String(alpha * intensity),
+            );
+          });
+          document.documentElement.dataset.splashScrimIntensity = String(intensity);
+        };
+
+        applyScrimIntensity(scrimIntensity);
 
         if (themeKind === 'light' || themeKind === 'dark') {
           document.documentElement.style.colorScheme = themeKind;
@@ -156,11 +196,16 @@
         }
 
         window.addEventListener('DOMContentLoaded', () => {
+          const scrim = document.querySelector('[data-testid="splash-scrim"]');
           const progress = document.querySelector('[data-testid="splash-progress"]');
           const progressBar = document.querySelector('[data-testid="splash-progress-bar"]');
           const progressValue = document.querySelector('[data-testid="splash-progress-value"]');
           let value = 8;
           let lastTimestamp = performance.now();
+
+          if (scrim) {
+            scrim.setAttribute('data-scrim-intensity', String(scrimIntensity));
+          }
 
           const updateProgress = (timestamp) => {
             const delta = Math.max(0, timestamp - lastTimestamp);
@@ -199,7 +244,7 @@
         draggable="false"
         src="./generated/splash/splash-background.png"
       />
-      <div class="scrim" aria-hidden="true"></div>
+      <div class="scrim" data-testid="splash-scrim" aria-hidden="true"></div>
       <section class="brand" aria-label="Pristine">
         <img
           alt="Pristine"

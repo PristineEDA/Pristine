@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { getEditorFontFamilyLabel } from '../../../editor/editorSettings';
@@ -133,6 +134,42 @@ describe('MenuBar settings', () => {
     expect(screen.getByTestId('settings-theme-advanced-button')).toBeVisible();
     expect(screen.getByTestId('settings-theme-import-button')).toBeVisible();
     expect(screen.getByTestId('settings-theme-combobox')).toHaveTextContent('Dark 2026');
+  });
+
+  it('configures the splash overlay intensity preview from appearance settings', async () => {
+    const user = userEvent.setup();
+    mockPersistedSettingsConfig({
+      splashScrimIntensity: 0.5,
+    });
+
+    renderMenuBar();
+
+    await user.click(screen.getByTestId('menu-settings-button'));
+    expect(await screen.findByTestId('settings-dialog')).toBeVisible();
+    await openSettingsPage(user, 'appearance');
+
+    expect(screen.getByTestId('settings-splash-scrim-value')).toHaveTextContent('50%');
+    expect(screen.getByTestId('settings-splash-preview')).toBeVisible();
+    expect(screen.getByTestId('settings-splash-preview-background')).toHaveAttribute(
+      'src',
+      './generated/splash/splash-background.png',
+    );
+    expect(screen.getByTestId('settings-splash-preview-logo')).toHaveAttribute(
+      'src',
+      './generated/logo/logo-32.png',
+    );
+    expect(screen.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.50');
+
+    const sliderThumb = within(screen.getByTestId('settings-splash-scrim-slider')).getByRole('slider');
+    sliderThumb.focus();
+    fireEvent.keyDown(sliderThumb, { key: 'Home' });
+    fireEvent.keyUp(sliderThumb, { key: 'Home' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-splash-scrim-value')).toHaveTextContent('0%');
+    });
+    expect(screen.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.00');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashScrimIntensity', 0);
   });
 
   it('navigates settings subpages and searches across pages', async () => {

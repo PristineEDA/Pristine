@@ -955,6 +955,7 @@ export type PersistedSettingsOptions = {
   minimapEnabled?: boolean;
   notificationDismissSeconds?: number;
   progressHideCompleted?: boolean;
+  splashScrimIntensity?: number;
   renderControlCharacters?: boolean;
   renderWhitespace?: string;
   scrollBeyondLastLine?: boolean;
@@ -985,6 +986,7 @@ export function mockPersistedSettingsConfig(options: PersistedSettingsOptions = 
     minimapEnabled: true,
     notificationDismissSeconds: 5,
     progressHideCompleted: true,
+    splashScrimIntensity: 1,
     renderControlCharacters: false,
     renderWhitespace: 'selection',
     scrollBeyondLastLine: false,
@@ -1041,6 +1043,8 @@ export function mockPersistedSettingsConfig(options: PersistedSettingsOptions = 
         return persisted.notificationDismissSeconds;
       case 'progress.hideCompleted':
         return persisted.progressHideCompleted;
+      case 'workbench.splashScrimIntensity':
+        return persisted.splashScrimIntensity;
       case 'editor.renderControlCharacters':
         return persisted.renderControlCharacters;
       case 'editor.renderWhitespace':

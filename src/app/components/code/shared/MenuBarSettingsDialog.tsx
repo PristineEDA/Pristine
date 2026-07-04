@@ -102,14 +102,27 @@ const CLOSE_ACTION_CONFIG_KEY = 'window.closeActionPreference';
 const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
 const NOTIFICATION_DISMISS_SECONDS_CONFIG_KEY = 'notifications.dismissSeconds';
 const PROGRESS_HIDE_COMPLETED_CONFIG_KEY = 'progress.hideCompleted';
+const SPLASH_SCRIM_INTENSITY_CONFIG_KEY = 'workbench.splashScrimIntensity';
 export const EDA_WSL_UBUNTU_DISTRO_CONFIG_KEY = 'eda.wslUbuntuDistro';
 const DEFAULT_NOTIFICATION_DISMISS_SECONDS = 5;
 const MIN_NOTIFICATION_DISMISS_SECONDS = 1;
 const MAX_NOTIFICATION_DISMISS_SECONDS = 10;
+const DEFAULT_SPLASH_SCRIM_INTENSITY = 1;
+const MIN_SPLASH_SCRIM_INTENSITY = 0;
+const MAX_SPLASH_SCRIM_INTENSITY = 1;
+const SPLASH_SCRIM_INTENSITY_STEP = 0.01;
 const THEME_PICKER_LAYOUT_MODE_CONFIG_KEY = 'workbench.themePickerLayoutMode';
 const settingsSectionClassName = 'overflow-hidden rounded-md border border-border/75 bg-background/35';
 const settingsSectionTitleClassName = 'text-[13px] font-medium';
 const settingsSectionDescriptionClassName = 'text-[12px] text-muted-foreground';
+const splashScrimBaseAlpha = {
+  top: 0.46,
+  mid: 0.24,
+  bottom: 0.62,
+  left: 0.52,
+  center: 0.08,
+  right: 0.34,
+};
 
 type ThemePickerLayoutMode = 'grouped' | 'list';
 interface SettingsPageMetadata {
@@ -221,6 +234,7 @@ export interface MenuBarSettingsState {
   floatingInfoWindowVisible: boolean;
   notificationDismissSeconds: number;
   progressHideCompleted: boolean;
+  splashScrimIntensity: number;
   wslUbuntuDistro: WslUbuntuDistro;
   themeId: string;
   themePickerLayoutMode: ThemePickerLayoutMode;
@@ -274,6 +288,40 @@ function getConfiguredNotificationDismissSeconds(): number {
 
 function getConfiguredProgressHideCompleted(): boolean {
   return window.electronAPI?.config.get(PROGRESS_HIDE_COMPLETED_CONFIG_KEY) !== false;
+}
+
+function parseSplashScrimIntensity(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_SPLASH_SCRIM_INTENSITY;
+  }
+
+  const roundedValue = Math.round(value / SPLASH_SCRIM_INTENSITY_STEP) * SPLASH_SCRIM_INTENSITY_STEP;
+  return Math.min(MAX_SPLASH_SCRIM_INTENSITY, Math.max(MIN_SPLASH_SCRIM_INTENSITY, roundedValue));
+}
+
+function getConfiguredSplashScrimIntensity(): number {
+  return parseSplashScrimIntensity(window.electronAPI?.config.get(SPLASH_SCRIM_INTENSITY_CONFIG_KEY));
+}
+
+function formatSplashScrimIntensity(value: number): string {
+  return `${Math.round(parseSplashScrimIntensity(value) * 100)}%`;
+}
+
+function getSplashScrimBackground(intensity: number): string {
+  const parsedIntensity = parseSplashScrimIntensity(intensity);
+  const alpha = {
+    top: splashScrimBaseAlpha.top * parsedIntensity,
+    mid: splashScrimBaseAlpha.mid * parsedIntensity,
+    bottom: splashScrimBaseAlpha.bottom * parsedIntensity,
+    left: splashScrimBaseAlpha.left * parsedIntensity,
+    center: splashScrimBaseAlpha.center * parsedIntensity,
+    right: splashScrimBaseAlpha.right * parsedIntensity,
+  };
+
+  return [
+    `linear-gradient(180deg, rgba(4, 8, 14, ${alpha.top}), rgba(4, 8, 14, ${alpha.mid}) 42%, rgba(4, 8, 14, ${alpha.bottom}))`,
+    `linear-gradient(90deg, rgba(4, 8, 14, ${alpha.left}), rgba(4, 8, 14, ${alpha.center}) 54%, rgba(4, 8, 14, ${alpha.right}))`,
+  ].join(', ');
 }
 
 export function getConfiguredWslUbuntuDistro(): WslUbuntuDistro {
@@ -408,6 +456,7 @@ function getPersistedSettingsState(): MenuBarSettingsState {
     floatingInfoWindowVisible: getFloatingInfoWindowVisible(),
     notificationDismissSeconds: getConfiguredNotificationDismissSeconds(),
     progressHideCompleted: getConfiguredProgressHideCompleted(),
+    splashScrimIntensity: getConfiguredSplashScrimIntensity(),
     wslUbuntuDistro: getConfiguredWslUbuntuDistro(),
     themeId: getConfiguredThemeId(),
     themePickerLayoutMode: getConfiguredThemePickerLayoutMode(),
@@ -541,6 +590,52 @@ function SettingsSliderSection({
           </p>
         </div>
         {children}
+      </div>
+    </div>
+  );
+}
+
+function SplashScrimPreview({ intensity }: { intensity: number }) {
+  const parsedIntensity = parseSplashScrimIntensity(intensity);
+
+  return (
+    <div
+      className="relative h-36 overflow-hidden rounded-md border border-border/75 bg-ide-tab-bg"
+      data-testid="settings-splash-preview"
+    >
+      <img
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 size-full object-cover"
+        data-testid="settings-splash-preview-background"
+        draggable={false}
+        src="./generated/splash/splash-background.png"
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        data-scrim-intensity={parsedIntensity.toFixed(2)}
+        data-testid="settings-splash-preview-scrim"
+        style={{ background: getSplashScrimBackground(parsedIntensity) }}
+      />
+      <div className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-md border border-white/20 bg-black/25 px-2 py-1.5 shadow-lg backdrop-blur">
+        <img
+          alt="Pristine"
+          className="size-5 rounded object-contain"
+          data-testid="settings-splash-preview-logo"
+          draggable={false}
+          src="./generated/logo/logo-32.png"
+        />
+        <span className="text-[12px] font-semibold leading-4 text-white">Pristine</span>
+      </div>
+      <div className="absolute inset-x-4 bottom-4 grid gap-2">
+        <div className="flex items-center justify-between text-[11px] leading-4 text-white/75">
+          <span>Restoring workspace</span>
+          <span>{formatSplashScrimIntensity(0.38)}</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-white/25">
+          <div className="h-full w-[38%] rounded-full bg-[#2acb7d] shadow-[0_0_14px_rgba(42,203,125,0.36)]" />
+        </div>
       </div>
     </div>
   );
@@ -860,6 +955,17 @@ export function useMenuBarSettingsController() {
     void window.electronAPI?.config.set(PROGRESS_HIDE_COMPLETED_CONFIG_KEY, checked);
   };
 
+  const handleSplashScrimIntensityChange = (value: number[]) => {
+    const nextValue = parseSplashScrimIntensity(value[0] ?? settingsState.splashScrimIntensity);
+    patchSettingsState({ splashScrimIntensity: nextValue });
+  };
+
+  const handleSplashScrimIntensityCommit = (value: number[]) => {
+    const nextValue = parseSplashScrimIntensity(value[0] ?? settingsState.splashScrimIntensity);
+    patchSettingsState({ splashScrimIntensity: nextValue });
+    void window.electronAPI?.config.set(SPLASH_SCRIM_INTENSITY_CONFIG_KEY, nextValue);
+  };
+
   const handleWslUbuntuDistroChange = (value: string) => {
     const nextDistro = parseWslUbuntuDistro(value);
     patchSettingsState({ wslUbuntuDistro: nextDistro });
@@ -1059,6 +1165,8 @@ export function useMenuBarSettingsController() {
     handleFloatingInfoWindowVisibleChange,
     handleNotificationDismissSecondsChange,
     handleProgressHideCompletedChange,
+    handleSplashScrimIntensityChange,
+    handleSplashScrimIntensityCommit,
     handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
@@ -1118,6 +1226,8 @@ export function MenuBarSettingsDialogs({
     handleFloatingInfoWindowVisibleChange,
     handleNotificationDismissSecondsChange,
     handleProgressHideCompletedChange,
+    handleSplashScrimIntensityChange,
+    handleSplashScrimIntensityCommit,
     handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
@@ -1276,6 +1386,42 @@ export function MenuBarSettingsDialogs({
             </div>
           )}
         />
+      ),
+    },
+    {
+      id: 'splash-overlay-intensity',
+      pageId: 'appearance',
+      title: 'Splash overlay intensity',
+      description: 'Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch.',
+      keywords: ['appearance', 'splash', 'startup', 'overlay', 'scrim', 'intensity'],
+      element: (
+        <SettingsSliderSection
+          title="Splash overlay intensity"
+          description="Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch."
+          testId="splash-scrim-intensity"
+        >
+          <div className="min-w-0 space-y-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Slider
+                aria-label="Splash overlay intensity"
+                data-testid="settings-splash-scrim-slider"
+                min={MIN_SPLASH_SCRIM_INTENSITY}
+                max={MAX_SPLASH_SCRIM_INTENSITY}
+                step={SPLASH_SCRIM_INTENSITY_STEP}
+                value={[settingsState.splashScrimIntensity]}
+                onValueChange={handleSplashScrimIntensityChange}
+                onValueCommit={handleSplashScrimIntensityCommit}
+              />
+              <span
+                className="min-w-12 shrink-0 text-right text-[13px] font-medium text-foreground"
+                data-testid="settings-splash-scrim-value"
+              >
+                {formatSplashScrimIntensity(settingsState.splashScrimIntensity)}
+              </span>
+            </div>
+            <SplashScrimPreview intensity={settingsState.splashScrimIntensity} />
+          </div>
+        </SettingsSliderSection>
       ),
     },
     {
@@ -1654,6 +1800,8 @@ export function MenuBarSettingsDialogs({
     handleFloatingInfoWindowVisibleChange,
     handleNotificationDismissSecondsChange,
     handleProgressHideCompletedChange,
+    handleSplashScrimIntensityChange,
+    handleSplashScrimIntensityCommit,
     handleWslUbuntuDistroChange,
     handleSchematicAlignmentGuidesEnabledChange,
     handleSchematicGridEnabledChange,
