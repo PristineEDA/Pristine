@@ -4267,19 +4267,33 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
   await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
   await expect(window.getByTestId('settings-splash-section-grid')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-placeholder-column')).toBeVisible();
   await expect(window.getByTestId('settings-splash-controls-column')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-overlay-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-visible-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-opacity-card')).toBeVisible();
   await expect(window.getByTestId('settings-splash-preview-column')).toBeVisible();
   await expect(window.getByTestId('settings-splash-preview')).toBeVisible();
   const splashSectionGridBox = await window.getByTestId('settings-splash-section-grid').boundingBox();
+  const splashPlaceholderColumnBox = await window.getByTestId('settings-splash-placeholder-column').boundingBox();
   const splashControlsColumnBox = await window.getByTestId('settings-splash-controls-column').boundingBox();
   const splashPreviewColumnBox = await window.getByTestId('settings-splash-preview-column').boundingBox();
   expect(splashSectionGridBox).not.toBeNull();
+  expect(splashPlaceholderColumnBox).not.toBeNull();
   expect(splashControlsColumnBox).not.toBeNull();
   expect(splashPreviewColumnBox).not.toBeNull();
-  if (splashPreviewColumnBox!.x > splashControlsColumnBox!.x + 1) {
+  await expect(window.getByTestId('settings-splash-placeholder-column')).toContainText('Splash controls');
+  await expect(window.getByTestId('settings-splash-overlay-card')).toContainText('Splash overlay intensity');
+  if (
+    splashControlsColumnBox!.x > splashPlaceholderColumnBox!.x + 1
+    && splashPreviewColumnBox!.x > splashControlsColumnBox!.x + 1
+  ) {
+    expect(splashControlsColumnBox!.x).toBeGreaterThan(splashPlaceholderColumnBox!.x);
     expect(splashPreviewColumnBox!.x).toBeGreaterThan(splashControlsColumnBox!.x);
   } else {
+    expect(Math.abs(splashControlsColumnBox!.x - splashPlaceholderColumnBox!.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(splashPreviewColumnBox!.x - splashControlsColumnBox!.x)).toBeLessThanOrEqual(1);
+    expect(splashControlsColumnBox!.y).toBeGreaterThan(splashPlaceholderColumnBox!.y);
     expect(splashPreviewColumnBox!.y).toBeGreaterThan(splashControlsColumnBox!.y);
   }
   const splashPreviewBox = await window.getByTestId('settings-splash-preview').boundingBox();

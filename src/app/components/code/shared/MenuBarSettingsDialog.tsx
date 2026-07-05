@@ -651,7 +651,7 @@ function SplashScrimPreview({
 
   return (
     <div
-      className="relative aspect-video w-full overflow-hidden rounded-md border border-border/75 bg-ide-tab-bg"
+      className="relative aspect-video w-full max-w-full overflow-hidden rounded-md border border-border/75 bg-ide-tab-bg"
       data-testid="settings-splash-preview"
     >
       <img
@@ -1476,93 +1476,121 @@ export function MenuBarSettingsDialogs({
       description: 'Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch.',
       keywords: ['appearance', 'splash', 'startup', 'overlay', 'scrim', 'intensity', 'progress'],
       element: (
-        <SettingsSliderSection
-          title="Splash overlay intensity"
-          description="Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch."
-          testId="splash-scrim-intensity"
-          contentGridClassName="lg:grid-cols-[minmax(220px,0.55fr)_minmax(0,1.45fr)] lg:items-center"
-          contentTestId="settings-splash-section-grid"
-        >
+        <div className={settingsSectionClassName}>
           <div
-            className="grid min-w-0 gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(320px,1fr)] xl:items-start"
-            data-testid="settings-splash-layout-grid"
+            className="min-w-0 px-4 py-3"
+            data-testid="settings-splash-section-grid"
           >
-            <div className="min-w-0 space-y-3" data-testid="settings-splash-controls-column">
-              <div className="flex min-w-0 items-center gap-3">
-                <Slider
-                  aria-label="Splash overlay intensity"
-                  data-testid="settings-splash-scrim-slider"
-                  min={MIN_SPLASH_SCRIM_INTENSITY}
-                  max={MAX_SPLASH_SCRIM_INTENSITY}
-                  step={SPLASH_SCRIM_INTENSITY_STEP}
-                  value={[settingsState.splashScrimIntensity]}
-                  onValueChange={handleSplashScrimIntensityChange}
-                  onValueCommit={handleSplashScrimIntensityCommit}
-                />
-                <span
-                  className="min-w-12 shrink-0 text-right text-[13px] font-medium text-foreground"
-                  data-testid="settings-splash-scrim-value"
+            <div
+              className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(220px,0.8fr)_minmax(300px,1fr)_minmax(0,1.2fr)] 2xl:items-stretch"
+              data-testid="settings-splash-layout-grid"
+            >
+              <div
+                className="min-w-0 rounded-md border border-border/60 bg-muted/25 px-3 py-3"
+                data-testid="settings-splash-placeholder-column"
+              >
+                <p className={settingsSectionTitleClassName}>Splash controls</p>
+                <p className={settingsSectionDescriptionClassName}>
+                  Additional startup visual controls will appear here.
+                </p>
+              </div>
+              <div className="min-w-0 space-y-3" data-testid="settings-splash-controls-column">
+                <div
+                  className="space-y-2 rounded-md border border-border/60 bg-muted/25 px-3 py-2"
+                  data-testid="settings-splash-overlay-card"
                 >
-                  {formatSplashScrimIntensity(settingsState.splashScrimIntensity)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4 rounded-md border border-border/60 bg-muted/25 px-3 py-2">
-                <div className="min-w-0 space-y-0.5">
-                  <p className="text-[12px] font-medium">Show splash progress</p>
-                  <p
-                    className="text-[11px] text-muted-foreground"
-                    data-testid="settings-splash-progress-visible-switch-description"
-                  >
-                    Show startup progress on the splash screen.
-                  </p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-[12px] font-medium">Splash overlay intensity</p>
+                      <p
+                        className="text-[11px] text-muted-foreground"
+                        data-testid="splash-scrim-intensity-description"
+                      >
+                        Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch.
+                      </p>
+                    </div>
+                    <span
+                      className="min-w-12 shrink-0 text-right text-[13px] font-medium text-foreground"
+                      data-testid="settings-splash-scrim-value"
+                    >
+                      {formatSplashScrimIntensity(settingsState.splashScrimIntensity)}
+                    </span>
+                  </div>
+                  <Slider
+                    aria-label="Splash overlay intensity"
+                    data-testid="settings-splash-scrim-slider"
+                    min={MIN_SPLASH_SCRIM_INTENSITY}
+                    max={MAX_SPLASH_SCRIM_INTENSITY}
+                    step={SPLASH_SCRIM_INTENSITY_STEP}
+                    value={[settingsState.splashScrimIntensity]}
+                    onValueChange={handleSplashScrimIntensityChange}
+                    onValueCommit={handleSplashScrimIntensityCommit}
+                  />
                 </div>
-                <Switch
-                  checked={settingsState.splashProgressVisible}
-                  className="shrink-0"
-                  data-testid="settings-splash-progress-visible-switch"
-                  onCheckedChange={handleSplashProgressVisibleChange}
-                />
-              </div>
-              <div className="space-y-2 rounded-md border border-border/60 bg-muted/25 px-3 py-2">
-                <div className="flex items-center justify-between gap-3">
+                <div
+                  className="flex items-center justify-between gap-4 rounded-md border border-border/60 bg-muted/25 px-3 py-2"
+                  data-testid="settings-splash-progress-visible-card"
+                >
                   <div className="min-w-0 space-y-0.5">
-                    <p className="text-[12px] font-medium">Progress panel opacity</p>
+                    <p className="text-[12px] font-medium">Show splash progress</p>
                     <p
                       className="text-[11px] text-muted-foreground"
-                      data-testid="settings-splash-progress-panel-opacity-description"
+                      data-testid="settings-splash-progress-visible-switch-description"
                     >
-                      Adjust the glass background behind startup progress.
+                      Show startup progress on the splash screen.
                     </p>
                   </div>
-                  <span
-                    className="min-w-12 shrink-0 text-right text-[13px] font-medium text-foreground"
-                    data-testid="settings-splash-progress-panel-opacity-value"
-                  >
-                    {formatSplashProgressPanelOpacity(settingsState.splashProgressPanelOpacity)}
-                  </span>
+                  <Switch
+                    checked={settingsState.splashProgressVisible}
+                    className="shrink-0"
+                    data-testid="settings-splash-progress-visible-switch"
+                    onCheckedChange={handleSplashProgressVisibleChange}
+                  />
                 </div>
-                <Slider
-                  aria-label="Progress panel opacity"
-                  data-testid="settings-splash-progress-panel-opacity-slider"
-                  disabled={!settingsState.splashProgressVisible}
-                  min={MIN_SPLASH_PROGRESS_PANEL_OPACITY}
-                  max={MAX_SPLASH_PROGRESS_PANEL_OPACITY}
-                  step={SPLASH_PROGRESS_PANEL_OPACITY_STEP}
-                  value={[settingsState.splashProgressPanelOpacity]}
-                  onValueChange={handleSplashProgressPanelOpacityChange}
-                  onValueCommit={handleSplashProgressPanelOpacityCommit}
+                <div
+                  className="space-y-2 rounded-md border border-border/60 bg-muted/25 px-3 py-2"
+                  data-testid="settings-splash-progress-opacity-card"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-[12px] font-medium">Progress panel opacity</p>
+                      <p
+                        className="text-[11px] text-muted-foreground"
+                        data-testid="settings-splash-progress-panel-opacity-description"
+                      >
+                        Adjust the glass background behind startup progress.
+                      </p>
+                    </div>
+                    <span
+                      className="min-w-12 shrink-0 text-right text-[13px] font-medium text-foreground"
+                      data-testid="settings-splash-progress-panel-opacity-value"
+                    >
+                      {formatSplashProgressPanelOpacity(settingsState.splashProgressPanelOpacity)}
+                    </span>
+                  </div>
+                  <Slider
+                    aria-label="Progress panel opacity"
+                    data-testid="settings-splash-progress-panel-opacity-slider"
+                    disabled={!settingsState.splashProgressVisible}
+                    min={MIN_SPLASH_PROGRESS_PANEL_OPACITY}
+                    max={MAX_SPLASH_PROGRESS_PANEL_OPACITY}
+                    step={SPLASH_PROGRESS_PANEL_OPACITY_STEP}
+                    value={[settingsState.splashProgressPanelOpacity]}
+                    onValueChange={handleSplashProgressPanelOpacityChange}
+                    onValueCommit={handleSplashProgressPanelOpacityCommit}
+                  />
+                </div>
+              </div>
+              <div className="min-w-0 max-w-full overflow-hidden" data-testid="settings-splash-preview-column">
+                <SplashScrimPreview
+                  intensity={settingsState.splashScrimIntensity}
+                  progressPanelOpacity={settingsState.splashProgressPanelOpacity}
+                  progressVisible={settingsState.splashProgressVisible}
                 />
               </div>
             </div>
-            <div className="min-w-0 pr-1" data-testid="settings-splash-preview-column">
-              <SplashScrimPreview
-                intensity={settingsState.splashScrimIntensity}
-                progressPanelOpacity={settingsState.splashProgressPanelOpacity}
-                progressVisible={settingsState.splashProgressVisible}
-              />
-            </div>
           </div>
-        </SettingsSliderSection>
+        </div>
       ),
     },
     {

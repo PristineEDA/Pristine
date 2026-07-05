@@ -151,33 +151,41 @@ describe('MenuBar settings', () => {
     await openSettingsPage(user, 'appearance');
 
     expect(screen.getByTestId('settings-splash-scrim-value')).toHaveTextContent('50%');
-    expect(screen.getByTestId('settings-splash-section-grid')).toHaveClass(
-      'lg:grid-cols-[minmax(220px,0.55fr)_minmax(0,1.45fr)]',
-      'lg:items-center',
-    );
-    expect(screen.getByTestId('settings-splash-section-grid')).not.toHaveClass(
-      'md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]',
-    );
+    expect(screen.getByTestId('settings-splash-section-grid')).toHaveClass('px-4', 'py-3');
     expect(screen.getByTestId('settings-splash-layout-grid')).toHaveClass(
       'grid',
       'gap-3',
-      'xl:grid-cols-[minmax(260px,1fr)_minmax(320px,1fr)]',
-      'xl:items-start',
+      '2xl:grid-cols-[minmax(220px,0.8fr)_minmax(300px,1fr)_minmax(0,1.2fr)]',
+      '2xl:items-stretch',
     );
-    expect(screen.getByTestId('settings-splash-controls-column')).toContainElement(
+    expect(screen.getByTestId('settings-splash-placeholder-column')).toHaveTextContent('Splash controls');
+    expect(screen.getByTestId('settings-splash-placeholder-column')).toHaveTextContent(
+      'Additional startup visual controls will appear here.',
+    );
+    expect(screen.getByTestId('settings-splash-placeholder-column')).not.toContainElement(
+      screen.getByTestId('settings-splash-scrim-slider'),
+    );
+    expect(screen.getByTestId('settings-splash-overlay-card')).toHaveTextContent('Splash overlay intensity');
+    expect(screen.getByTestId('settings-splash-overlay-card')).toHaveTextContent(
+      'Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch.',
+    );
+    expect(screen.getByTestId('settings-splash-overlay-card')).toContainElement(
       screen.getByTestId('settings-splash-scrim-slider'),
     );
     expect(screen.getByTestId('settings-splash-controls-column')).toContainElement(
-      screen.getByTestId('settings-splash-progress-visible-switch'),
+      screen.getByTestId('settings-splash-overlay-card'),
     );
     expect(screen.getByTestId('settings-splash-controls-column')).toContainElement(
-      screen.getByTestId('settings-splash-progress-panel-opacity-slider'),
+      screen.getByTestId('settings-splash-progress-visible-card'),
+    );
+    expect(screen.getByTestId('settings-splash-controls-column')).toContainElement(
+      screen.getByTestId('settings-splash-progress-opacity-card'),
     );
     expect(screen.getByTestId('settings-splash-preview-column')).toContainElement(
       screen.getByTestId('settings-splash-preview'),
     );
     expect(screen.getByTestId('settings-splash-preview')).toBeVisible();
-    expect(screen.getByTestId('settings-splash-preview')).toHaveClass('aspect-video', 'w-full');
+    expect(screen.getByTestId('settings-splash-preview')).toHaveClass('aspect-video', 'w-full', 'max-w-full');
     expect(screen.getByTestId('settings-splash-preview-background')).toHaveAttribute(
       'src',
       './generated/splash/splash-background.png',
