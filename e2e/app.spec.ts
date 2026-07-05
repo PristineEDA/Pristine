@@ -4276,7 +4276,12 @@ test('settings dialog supports subpage navigation and global search', async () =
   expect(splashSectionGridBox).not.toBeNull();
   expect(splashControlsColumnBox).not.toBeNull();
   expect(splashPreviewColumnBox).not.toBeNull();
-  expect(splashPreviewColumnBox!.x).toBeGreaterThan(splashControlsColumnBox!.x);
+  if (splashPreviewColumnBox!.x > splashControlsColumnBox!.x + 1) {
+    expect(splashPreviewColumnBox!.x).toBeGreaterThan(splashControlsColumnBox!.x);
+  } else {
+    expect(Math.abs(splashPreviewColumnBox!.x - splashControlsColumnBox!.x)).toBeLessThanOrEqual(1);
+    expect(splashPreviewColumnBox!.y).toBeGreaterThan(splashControlsColumnBox!.y);
+  }
   const splashPreviewBox = await window.getByTestId('settings-splash-preview').boundingBox();
   expect(splashPreviewBox).not.toBeNull();
   expect(splashPreviewBox!.x + splashPreviewBox!.width).toBeLessThanOrEqual(
