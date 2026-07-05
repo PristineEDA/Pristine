@@ -38,6 +38,19 @@ describe('MenuBar', () => {
     expect(screen.getByTestId('menu-bar-root')).not.toHaveClass('border-ide-border');
   });
 
+  it('renders the window-local Pristine app logo image', () => {
+    renderMenuBar();
+
+    const appIcon = screen.getByTestId('menu-app-icon');
+    const logo = screen.getByTestId('menu-app-logo-image');
+
+    expect(appIcon).toContainElement(logo);
+    expect(logo).toHaveAttribute('alt', 'Pristine');
+    expect(logo).toHaveAttribute('draggable', 'false');
+    expect(logo).toHaveAttribute('src', './generated/logo/logo-32.png');
+    expect(appIcon).not.toHaveTextContent('P');
+  });
+
   it('calls electron window controls directly', async () => {
     const user = userEvent.setup();
 

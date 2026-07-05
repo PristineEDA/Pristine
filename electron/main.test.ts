@@ -14,6 +14,7 @@ type BrowserWindowInstance = {
   webContents: {
     send: Mock<(channel: string, ...args: unknown[]) => void>;
     isDestroyed: Mock<() => boolean>;
+    executeJavaScript: Mock<(script: string, userGesture?: boolean) => Promise<unknown>>;
   };
   on: Mock<(event: string, handler: (...args: unknown[]) => void) => BrowserWindowInstance>;
   once: Mock<(event: string, handler: (...args: unknown[]) => void) => BrowserWindowInstance>;
@@ -31,6 +32,7 @@ type BrowserWindowInstance = {
 
 type TrayInstance = {
   icon: unknown;
+  setImage: Mock<(image: unknown) => void>;
   setToolTip: Mock<(tooltip: string) => void>;
   setContextMenu: Mock<(menu: unknown) => void>;
   popUpContextMenu: Mock<(menu?: unknown) => void>;
@@ -49,6 +51,27 @@ const mocks = vi.hoisted(() => {
     ['userData', `${mockAppDataPath}/Pristine`],
     ['sessionData', `${mockAppDataPath}/Pristine/session-data`],
   ]);
+  const mockExecuteJavaScript = vi.fn<(script: string, userGesture?: boolean) => Promise<unknown>>(
+    () => Promise.resolve(true),
+  );
+
+  function createMockNativeImage(
+    kind: string,
+    options: { empty?: boolean; path?: string; sourceBuffer?: Buffer; sourceOptions?: Record<string, unknown> } = {},
+  ) {
+    const image = {
+      kind,
+      path: options.path,
+      sourceBuffer: options.sourceBuffer,
+      sourceOptions: options.sourceOptions,
+      getSize: vi.fn(() => ({ height: 32, width: 32 })),
+      isEmpty: vi.fn(() => options.empty === true),
+      resize: vi.fn(() => image),
+      toBitmap: vi.fn(() => Buffer.alloc(32 * 32 * 4)),
+    };
+
+    return image;
+  }
 
   class BrowserWindowMock {
     static getAllWindows = vi.fn(() => browserWindowInstances);
@@ -69,6 +92,7 @@ const mocks = vi.hoisted(() => {
     webContents = {
       send: vi.fn(),
       isDestroyed: vi.fn(() => false),
+      executeJavaScript: vi.fn((script: string, userGesture?: boolean) => mockExecuteJavaScript(script, userGesture)),
     };
     private visible: boolean;
     private maximized = false;
@@ -139,6 +163,7 @@ const mocks = vi.hoisted(() => {
   }
 
   class TrayMock {
+    setImage = vi.fn();
     setToolTip = vi.fn();
     setContextMenu = vi.fn();
     popUpContextMenu = vi.fn();
@@ -188,9 +213,12 @@ const mocks = vi.hoisted(() => {
     mockSetApplicationMenu: vi.fn(),
     mockWriteShortcutLink: vi.fn(() => true),
     mockExistsSync: vi.fn<(filePath: string) => boolean>(() => true),
-    mockCreateFromDataURL: vi.fn(() => ({ kind: 'native-image-data-url' })),
-    mockCreateFromPath: vi.fn((filePath: string) => ({ kind: 'native-image-path', path: filePath })),
-    mockCreateEmpty: vi.fn(() => ({ kind: 'native-image-empty' })),
+    mockCreateFromDataURL: vi.fn(() => createMockNativeImage('native-image-data-url')),
+    mockCreateFromPath: vi.fn((filePath: string) => createMockNativeImage('native-image-path', { path: filePath })),
+    mockCreateFromBuffer: vi.fn((sourceBuffer: Buffer, sourceOptions?: Record<string, unknown>) => (
+      createMockNativeImage('native-image-buffer', { sourceBuffer, sourceOptions })
+    )),
+    mockCreateEmpty: vi.fn(() => createMockNativeImage('native-image-empty', { empty: true })),
     mockDisposeLspSession: vi.fn(),
     mockDisposeAllTerminalSessions: vi.fn(),
     mockFlushPendingConfigSave: vi.fn(),
@@ -203,6 +231,7 @@ const mocks = vi.hoisted(() => {
     mockTryOpenStartupProject: vi.fn(),
     mockHandleAuthCallbackUrl: vi.fn<(url: string) => Promise<void>>(() => Promise.resolve()),
     mockIsAuthProtocolUrl: vi.fn<(value: string) => boolean>((value: string) => value.startsWith('pristine://')),
+    mockExecuteJavaScript,
   };
 });
 
@@ -236,6 +265,7 @@ vi.mock('electron', () => ({
   },
   nativeImage: {
     createFromDataURL: mocks.mockCreateFromDataURL,
+    createFromBuffer: mocks.mockCreateFromBuffer,
     createFromPath: mocks.mockCreateFromPath,
     createEmpty: mocks.mockCreateEmpty,
   },
@@ -297,6 +327,7 @@ async function importMain(options?: {
   userDataPath?: string;
   configValues?: Record<string, unknown>;
   singleInstanceLock?: boolean;
+  splashExecuteJavaScript?: (script: string, userGesture?: boolean) => Promise<unknown>;
 }) {
   vi.resetModules();
   mocks.appHandlers.clear();
@@ -322,7 +353,12 @@ async function importMain(options?: {
   mocks.mockWriteShortcutLink.mockClear();
   mocks.mockExistsSync.mockReset();
   mocks.mockExistsSync.mockImplementation(() => true);
+  mocks.mockExecuteJavaScript.mockReset();
+  mocks.mockExecuteJavaScript.mockImplementation(
+    options?.splashExecuteJavaScript ?? (() => Promise.resolve(true)),
+  );
   mocks.mockCreateFromDataURL.mockClear();
+  mocks.mockCreateFromBuffer.mockClear();
   mocks.mockCreateFromPath.mockClear();
   mocks.mockCreateEmpty.mockClear();
   mocks.mockDisposeLspSession.mockClear();
@@ -496,12 +532,16 @@ describe('electron main entry', () => {
 
     expect(getMainWindow?.()).toBe(mainWindow);
     expect(trayInstances[0].setToolTip).toHaveBeenCalledWith('Pristine');
+    expect(trayInstances[0].setImage).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'native-image-path',
+      path: expect.stringMatching(/logo-32\.png$/),
+    }));
     expect(trayInstances[0].icon).toMatchObject({
       kind: 'native-image-path',
-      path: expect.stringMatching(/logo-v1-32\.png$/),
+      path: expect.stringMatching(/logo-32\.png$/),
     });
-    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-v1-32\.png$/));
-    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-v1-256\.png$/));
+    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-32\.png$/));
+    expect(mocks.mockCreateFromPath).toHaveBeenCalledWith(expect.stringMatching(/logo-256\.png$/));
     expect(mocks.mockCreateEmpty).not.toHaveBeenCalled();
     expect(mocks.mockBuildFromTemplate).toHaveBeenCalledWith([
       expect.objectContaining({ label: 'Open Pristine' }),
@@ -515,11 +555,17 @@ describe('electron main entry', () => {
       frame: false,
       resizable: false,
       skipTaskbar: true,
-      backgroundColor: '#191A1B',
+      show: false,
+      backgroundColor: '#2F6680',
     });
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/public[\\/]splash\.html$/), {
       query: {
-        backgroundColor: '#191A1B',
+        backgroundColor: '#2F6680',
+        splashProgressGlassVisible: 'true',
+        splashProgressPanelOpacity: '0.45',
+        splashProgressVisible: 'true',
+        splashProgressWidth: 'full',
+        splashScrimIntensity: '1',
         themeKind: 'dark',
       },
     });
@@ -548,6 +594,7 @@ describe('electron main entry', () => {
     expect(mainWindow.loadFile).not.toHaveBeenCalled();
     expect(mainWindow.show).not.toHaveBeenCalled();
 
+    splashWindow.emit('ready-to-show');
     mainWindow.emit('ready-to-show');
     await vi.advanceTimersByTimeAsync(1000);
     expect(mainWindow.show).not.toHaveBeenCalled();
@@ -555,6 +602,7 @@ describe('electron main entry', () => {
 
     await vi.runAllTimersAsync();
     await Promise.resolve();
+    expect(splashWindow.show).toHaveBeenCalledTimes(1);
     expect(mainWindow.show).toHaveBeenCalledTimes(1);
     expect(splashWindow.close).toHaveBeenCalledTimes(1);
     expect(mocks.mockSetApplicationMenu).not.toHaveBeenCalled();
@@ -562,6 +610,119 @@ describe('electron main entry', () => {
     mainWindow.emit('closed');
     expect(getMainWindow?.()).toBeNull();
     expect(mocks.mockDisposeAllTerminalSessions).not.toHaveBeenCalled();
+  });
+
+  it('shows the hidden splash window after splash assets are ready', async () => {
+    const { browserWindowInstances } = await importMain({
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+    });
+    const splashWindow = browserWindowInstances[0];
+
+    expect(splashWindow.options).toMatchObject({
+      show: false,
+      backgroundColor: '#2F6680',
+    });
+    expect(splashWindow.webContents.executeJavaScript).toHaveBeenCalledWith(
+      expect.stringContaining('__pristineSplashAssetsReady'),
+      true,
+    );
+    expect(splashWindow.show).not.toHaveBeenCalled();
+
+    splashWindow.emit('ready-to-show');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(splashWindow.show).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to showing the splash after the asset ready timeout and keeps the visible duration', async () => {
+    const { browserWindowInstances, markWorkspaceReady } = await importMain({
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+      splashExecuteJavaScript: () => new Promise(() => undefined),
+    });
+    const splashWindow = browserWindowInstances[0];
+    const mainWindow = browserWindowInstances[1];
+
+    splashWindow.emit('ready-to-show');
+    mainWindow.emit('ready-to-show');
+    markWorkspaceReady?.();
+
+    await vi.advanceTimersByTimeAsync(1499);
+    await Promise.resolve();
+
+    expect(splashWindow.show).not.toHaveBeenCalled();
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+
+    expect(splashWindow.show).toHaveBeenCalledTimes(1);
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2999);
+    await Promise.resolve();
+
+    expect(mainWindow.show).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+
+    expect(mainWindow.show).toHaveBeenCalledTimes(1);
+    expect(splashWindow.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates tray icon and tooltip for unread notifications', async () => {
+    const { trayInstances } = await importMain({
+      platform: 'win32',
+      devServerUrl: 'http://127.0.0.1:5173',
+    });
+
+    const tray = trayInstances[0];
+    const onNotificationHistoryChanged = mocks.mockRegisterAllHandlers.mock.calls[0]?.[8] as
+      | ((records: Array<{ id: string; readAt?: number }>) => void)
+      | undefined;
+
+    expect(onNotificationHistoryChanged).toEqual(expect.any(Function));
+
+    tray.setImage.mockClear();
+    tray.setToolTip.mockClear();
+    mocks.mockCreateFromDataURL.mockClear();
+    mocks.mockCreateFromBuffer.mockClear();
+    mocks.mockCreateFromPath.mockClear();
+
+    onNotificationHistoryChanged?.([
+      { id: 'notification-2' },
+      { id: 'notification-1' },
+    ]);
+
+    expect(mocks.mockCreateFromBuffer).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      { height: 32, scaleFactor: 1, width: 32 },
+    );
+    expect(tray.setImage).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'native-image-buffer',
+      sourceOptions: { height: 32, scaleFactor: 1, width: 32 },
+    }));
+    expect(tray.setToolTip).toHaveBeenLastCalledWith('Pristine\n2 unread notifications');
+
+    onNotificationHistoryChanged?.([
+      { id: 'notification-2', readAt: 200 },
+      { id: 'notification-1' },
+    ]);
+
+    expect(tray.setToolTip).toHaveBeenLastCalledWith('Pristine\n1 unread notification');
+
+    onNotificationHistoryChanged?.([
+      { id: 'notification-2', readAt: 200 },
+      { id: 'notification-1', readAt: 300 },
+    ]);
+
+    expect(tray.setImage).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'native-image-path',
+      path: expect.stringMatching(/logo-32\.png$/),
+    }));
+    expect(tray.setToolTip).toHaveBeenLastCalledWith('Pristine');
   });
 
   it('uses the last project root from config when no project env override is present', async () => {
@@ -589,6 +750,7 @@ describe('electron main entry', () => {
     const splashWindow = browserWindowInstances[0];
     const mainWindow = browserWindowInstances[1];
 
+    splashWindow.emit('ready-to-show');
     mainWindow.emit('ready-to-show');
     await vi.advanceTimersByTimeAsync(1000);
     markWorkspaceReady?.();
@@ -619,6 +781,7 @@ describe('electron main entry', () => {
     expect(mainWindow.maximize).not.toHaveBeenCalled();
     expect(mainWindow.show).not.toHaveBeenCalled();
 
+    splashWindow.emit('ready-to-show');
     mainWindow.emit('ready-to-show');
     await vi.advanceTimersByTimeAsync(1000);
     markWorkspaceReady?.();
@@ -654,6 +817,11 @@ describe('electron main entry', () => {
       platform: 'win32',
       configValues: {
         'workbench.colorThemeKind': 'light',
+        'workbench.splashScrimIntensity': 0.42,
+        'workbench.splashProgressVisible': false,
+        'workbench.splashProgressGlassVisible': false,
+        'workbench.splashProgressWidth': 'half',
+        'workbench.splashProgressPanelOpacity': 0.72,
         'workbench.startupBackgroundColor': '#112233',
         'workbench.splashBackgroundColor': '#223344',
       },
@@ -671,7 +839,39 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
       query: {
         backgroundColor: '#223344',
+        splashProgressGlassVisible: 'false',
+        splashProgressPanelOpacity: '0.72',
+        splashProgressVisible: 'false',
+        splashProgressWidth: 'half',
+        splashScrimIntensity: '0.42',
         themeKind: 'light',
+      },
+    });
+  });
+
+  it('falls back to the default splash scrim intensity for invalid config values', async () => {
+    const { browserWindowInstances } = await importMain({
+      platform: 'win32',
+      configValues: {
+        'workbench.splashScrimIntensity': 'invalid',
+        'workbench.splashProgressVisible': 'invalid',
+        'workbench.splashProgressGlassVisible': 'invalid',
+        'workbench.splashProgressWidth': 'invalid',
+        'workbench.splashProgressPanelOpacity': 'invalid',
+      },
+    });
+
+    const splashWindow = browserWindowInstances[0];
+
+    expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
+      query: {
+        backgroundColor: '#2F6680',
+        splashProgressGlassVisible: 'true',
+        splashProgressPanelOpacity: '0.45',
+        splashProgressVisible: 'true',
+        splashProgressWidth: 'full',
+        splashScrimIntensity: '1',
+        themeKind: 'dark',
       },
     });
   });
@@ -704,7 +904,12 @@ describe('electron main entry', () => {
     expect(mainWindow.loadURL).not.toHaveBeenCalled();
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/dist[\\/]splash\.html$/), {
       query: {
-        backgroundColor: '#191A1B',
+        backgroundColor: '#2F6680',
+        splashProgressGlassVisible: 'true',
+        splashProgressPanelOpacity: '0.45',
+        splashProgressVisible: 'true',
+        splashProgressWidth: 'full',
+        splashScrimIntensity: '1',
         themeKind: 'dark',
       },
     });

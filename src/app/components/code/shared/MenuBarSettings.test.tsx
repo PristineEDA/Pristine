@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { getEditorFontFamilyLabel } from '../../../editor/editorSettings';
@@ -133,6 +134,112 @@ describe('MenuBar settings', () => {
     expect(screen.getByTestId('settings-theme-advanced-button')).toBeVisible();
     expect(screen.getByTestId('settings-theme-import-button')).toBeVisible();
     expect(screen.getByTestId('settings-theme-combobox')).toHaveTextContent('Dark 2026');
+  });
+
+  it('configures the splash overlay intensity preview from appearance settings', async () => {
+    const user = userEvent.setup();
+    mockPersistedSettingsConfig({
+      splashScrimIntensity: 0.5,
+      splashProgressPanelOpacity: 0.45,
+      splashProgressGlassVisible: true,
+      splashProgressWidth: 'full',
+      splashProgressVisible: true,
+    });
+
+    renderMenuBar();
+
+    await user.click(screen.getByTestId('menu-settings-button'));
+    expect(await screen.findByTestId('settings-dialog')).toBeVisible();
+    await openSettingsPage(user, 'appearance');
+
+    expect(screen.getByTestId('settings-splash-scrim-value')).toHaveTextContent('50%');
+    expect(screen.getByTestId('settings-splash-section-grid')).toHaveClass('px-4', 'py-3');
+    expect(screen.getByTestId('settings-splash-layout-grid')).toHaveClass(
+      'grid',
+      'gap-3',
+      '2xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.1fr)_minmax(0,1.25fr)]',
+      '2xl:items-stretch',
+    );
+    expect(screen.queryByTestId('settings-splash-placeholder-column')).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-splash-overlay-column')).toContainElement(
+      screen.getByTestId('settings-splash-overlay-card'),
+    );
+    expect(screen.getByTestId('settings-splash-overlay-card')).toHaveTextContent('Splash overlay intensity');
+    expect(screen.getByTestId('settings-splash-overlay-card')).toHaveTextContent(
+      'Adjust the dark gradient overlay on the startup splash screen. Changes apply on the next launch.',
+    );
+    expect(screen.getByTestId('settings-splash-overlay-card')).toContainElement(
+      screen.getByTestId('settings-splash-scrim-slider'),
+    );
+    const progressColumn = screen.getByTestId('settings-splash-progress-column');
+    expect(Array.from(progressColumn.children).map((child) => child.getAttribute('data-testid'))).toEqual([
+      'settings-splash-progress-visible-card',
+      'settings-splash-progress-glass-visible-card',
+      'settings-splash-progress-width-card',
+      'settings-splash-progress-opacity-card',
+    ]);
+    expect(screen.getByTestId('settings-splash-preview-column')).toContainElement(
+      screen.getByTestId('settings-splash-preview'),
+    );
+    expect(screen.getByTestId('settings-splash-preview')).toBeVisible();
+    expect(screen.getByTestId('settings-splash-preview')).toHaveClass('aspect-video', 'w-full', 'max-w-full');
+    expect(screen.getByTestId('settings-splash-preview-background')).toHaveAttribute(
+      'src',
+      './generated/splash/splash-background.png',
+    );
+    expect(screen.getByTestId('settings-splash-preview-logo')).toHaveAttribute(
+      'src',
+      './generated/logo/logo-32.png',
+    );
+    expect(screen.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.50');
+    expect(screen.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+    expect(screen.getByTestId('settings-splash-progress-glass-visible-switch')).toHaveAttribute('data-state', 'checked');
+    expect(screen.getByTestId('settings-splash-progress-width-select')).toHaveTextContent('Full width');
+    expect(screen.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveTextContent('45%');
+    expect(screen.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'full');
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-glass-visible', 'true');
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-width', 'full');
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '0.45');
+
+    const sliderThumb = within(screen.getByTestId('settings-splash-scrim-slider')).getByRole('slider');
+    sliderThumb.focus();
+    fireEvent.keyDown(sliderThumb, { key: 'Home' });
+    fireEvent.keyUp(sliderThumb, { key: 'Home' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-splash-scrim-value')).toHaveTextContent('0%');
+    });
+    expect(screen.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.00');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashScrimIntensity', 0);
+
+    const progressOpacitySlider = within(screen.getByTestId('settings-splash-progress-panel-opacity-slider')).getByRole('slider');
+    progressOpacitySlider.focus();
+    fireEvent.keyDown(progressOpacitySlider, { key: 'End' });
+    fireEvent.keyUp(progressOpacitySlider, { key: 'End' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveTextContent('100%');
+    });
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '1.00');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressPanelOpacity', 1);
+
+    await user.click(screen.getByTestId('settings-splash-progress-width-select'));
+    await user.click(await screen.findByTestId('settings-splash-progress-width-option-half'));
+    expect(screen.getByTestId('settings-splash-progress-width-select')).toHaveTextContent('1/2 screen');
+    expect(screen.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'half');
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-width', 'half');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressWidth', 'half');
+
+    await user.click(screen.getByTestId('settings-splash-progress-glass-visible-switch'));
+    expect(screen.getByTestId('settings-splash-progress-glass-visible-switch')).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-glass-visible', 'false');
+    expect(screen.getByTestId('settings-splash-progress-panel-opacity-slider')).toHaveAttribute('data-disabled');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressGlassVisible', false);
+
+    await user.click(screen.getByTestId('settings-splash-progress-visible-switch'));
+    expect(screen.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByTestId('settings-splash-preview-progress-shell')).toHaveClass('hidden');
+    expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressVisible', false);
   });
 
   it('navigates settings subpages and searches across pages', async () => {

@@ -20,17 +20,24 @@ import { stopPristineEdaEnvironment } from './ipc/wsl.js';
 import type { WindowCloseDecision, WindowCloseRequest } from '../src/app/window/windowClose.js';
 import type { FloatingInfoWindowMode } from '../src/app/window/floatingInfoWindow.js';
 import type { ProjectWindowState } from '../types/project.js';
+import type { NotificationRecord } from '../types/notification.js';
 import { handleAuthCallbackUrl, isAuthProtocolUrl } from './ipc/auth.js';
-import { createAppLogoNativeImage } from './appLogo.js';
+import { createAppLogoNativeImage, createAppLogoUnreadNativeImage } from './appLogo.js';
 import { ensureWindowsNotificationShortcut } from './windowsNotificationIdentity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MINIMUM_SPLASH_DURATION_MS = 3000;
+const SPLASH_ASSETS_READY_TIMEOUT_MS = 1500;
 const WORKSPACE_READY_TIMEOUT_MS = 1500;
 const CLOSE_ACTION_CONFIG_KEY = 'window.closeActionPreference';
 const FLOATING_INFO_VISIBLE_CONFIG_KEY = 'ui.floatingInfoWindow.visible';
 const WORKBENCH_COLOR_THEME_KIND_CONFIG_KEY = 'workbench.colorThemeKind';
 const WORKBENCH_FLOATING_INFO_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.floatingInfoBackgroundColor';
+const WORKBENCH_SPLASH_SCRIM_INTENSITY_CONFIG_KEY = 'workbench.splashScrimIntensity';
+const WORKBENCH_SPLASH_PROGRESS_VISIBLE_CONFIG_KEY = 'workbench.splashProgressVisible';
+const WORKBENCH_SPLASH_PROGRESS_GLASS_VISIBLE_CONFIG_KEY = 'workbench.splashProgressGlassVisible';
+const WORKBENCH_SPLASH_PROGRESS_WIDTH_CONFIG_KEY = 'workbench.splashProgressWidth';
+const WORKBENCH_SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY = 'workbench.splashProgressPanelOpacity';
 const WORKBENCH_SPLASH_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.splashBackgroundColor';
 const WORKBENCH_STARTUP_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.startupBackgroundColor';
 const AUTH_CALLBACK_PROTOCOL = 'pristine';
@@ -42,10 +49,20 @@ const FLOATING_INFO_EXPANDED_HEIGHT = 96;
 const FLOATING_INFO_DETAIL_WIDTH = 360;
 const FLOATING_INFO_DETAIL_HEIGHT = 520;
 const DEFAULT_STARTUP_BACKGROUND_COLOR = '#121314';
-const DEFAULT_SPLASH_BACKGROUND_COLOR = '#191A1B';
+const DEFAULT_SPLASH_BACKGROUND_COLOR = '#2F6680';
 const DEFAULT_FLOATING_INFO_BACKGROUND_COLOR = '#121314';
+const DEFAULT_SPLASH_SCRIM_INTENSITY = 1;
+const DEFAULT_SPLASH_PROGRESS_VISIBLE = true;
+const DEFAULT_SPLASH_PROGRESS_GLASS_VISIBLE = true;
+const DEFAULT_SPLASH_PROGRESS_WIDTH = 'full';
+const DEFAULT_SPLASH_PROGRESS_PANEL_OPACITY = 0.45;
+const SPLASH_ASSETS_READY_SCRIPT = `(() => {
+  const waitForAssetsReady = window.__pristineSplashAssetsReady;
+  return typeof waitForAssetsReady === 'function' ? waitForAssetsReady() : Promise.resolve(false);
+})()`;
 
 type ThemeKind = 'light' | 'dark';
+type SplashProgressWidth = 'quarter' | 'half' | 'full';
 
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
@@ -59,6 +76,8 @@ let pendingAuthCallbackUrl: string | null = null;
 let pendingProjectWindowState: ProjectWindowState | null = null;
 let resolveWorkspaceReady: (() => void) | null = null;
 let workspaceReadyPromise: Promise<void> = Promise.resolve();
+let splashVisiblePromise: Promise<void> = Promise.resolve();
+let trayUnreadNotificationCount = 0;
 
 app.setName(APP_DISPLAY_NAME);
 
@@ -225,10 +244,54 @@ function getConfiguredWindowBackgroundColor(configKey: string, fallback: string)
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-function createRendererSurfaceQuery(backgroundColor: string): Record<string, string> {
+function parseSplashScrimIntensity(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
+    : DEFAULT_SPLASH_SCRIM_INTENSITY;
+}
+
+function getConfiguredSplashScrimIntensity(): number {
+  return parseSplashScrimIntensity(getConfigValue(WORKBENCH_SPLASH_SCRIM_INTENSITY_CONFIG_KEY));
+}
+
+function getConfiguredSplashProgressVisible(): boolean {
+  const value = getConfigValue(WORKBENCH_SPLASH_PROGRESS_VISIBLE_CONFIG_KEY);
+  return typeof value === 'boolean' ? value : DEFAULT_SPLASH_PROGRESS_VISIBLE;
+}
+
+function getConfiguredSplashProgressGlassVisible(): boolean {
+  const value = getConfigValue(WORKBENCH_SPLASH_PROGRESS_GLASS_VISIBLE_CONFIG_KEY);
+  return typeof value === 'boolean' ? value : DEFAULT_SPLASH_PROGRESS_GLASS_VISIBLE;
+}
+
+function parseSplashProgressWidth(value: unknown): SplashProgressWidth {
+  return value === 'quarter' || value === 'half' || value === 'full'
+    ? value
+    : DEFAULT_SPLASH_PROGRESS_WIDTH;
+}
+
+function getConfiguredSplashProgressWidth(): SplashProgressWidth {
+  return parseSplashProgressWidth(getConfigValue(WORKBENCH_SPLASH_PROGRESS_WIDTH_CONFIG_KEY));
+}
+
+function parseSplashProgressPanelOpacity(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
+    : DEFAULT_SPLASH_PROGRESS_PANEL_OPACITY;
+}
+
+function getConfiguredSplashProgressPanelOpacity(): number {
+  return parseSplashProgressPanelOpacity(getConfigValue(WORKBENCH_SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY));
+}
+
+function createRendererSurfaceQuery(
+  backgroundColor: string,
+  extraQuery?: Record<string, string>,
+): Record<string, string> {
   return {
     backgroundColor,
     themeKind: getConfiguredThemeKind(),
+    ...extraQuery,
   };
 }
 
@@ -598,14 +661,40 @@ function createTray(): Tray {
   const nextTray = new Tray(createAppLogoNativeImage(32));
   const trayMenu = createTrayMenu();
 
-  nextTray.setToolTip('Pristine');
   nextTray.setContextMenu(trayMenu);
   nextTray.on('click', () => {
     nextTray.popUpContextMenu(trayMenu);
   });
 
   tray = nextTray;
+  updateTrayNotificationPresentation();
   return nextTray;
+}
+
+function getTrayTooltip(unreadCount: number): string {
+  if (unreadCount <= 0) {
+    return 'Pristine';
+  }
+
+  return `Pristine\n${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`;
+}
+
+function updateTrayNotificationPresentation(): void {
+  if (!tray) {
+    return;
+  }
+
+  tray.setImage(
+    trayUnreadNotificationCount > 0
+      ? createAppLogoUnreadNativeImage(32)
+      : createAppLogoNativeImage(32),
+  );
+  tray.setToolTip(getTrayTooltip(trayUnreadNotificationCount));
+}
+
+function updateTrayNotifications(records: NotificationRecord[]): void {
+  trayUnreadNotificationCount = records.filter((record) => record.readAt === undefined).length;
+  updateTrayNotificationPresentation();
 }
 
 function createSplashWindow(): BrowserWindow {
@@ -621,7 +710,7 @@ function createSplashWindow(): BrowserWindow {
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
-    show: true,
+    show: false,
     center: true,
     skipTaskbar: true,
     backgroundColor,
@@ -635,9 +724,17 @@ function createSplashWindow(): BrowserWindow {
     },
   });
 
-  window.loadFile(getSplashHtmlPath(), {
-    query: createRendererSurfaceQuery(backgroundColor),
-  });
+  const splashReadyToShowPromise = waitForWindowReady(window);
+  const splashLoadPromise = Promise.resolve(window.loadFile(getSplashHtmlPath(), {
+    query: createRendererSurfaceQuery(backgroundColor, {
+      splashScrimIntensity: String(getConfiguredSplashScrimIntensity()),
+      splashProgressVisible: String(getConfiguredSplashProgressVisible()),
+      splashProgressGlassVisible: String(getConfiguredSplashProgressGlassVisible()),
+      splashProgressWidth: getConfiguredSplashProgressWidth(),
+      splashProgressPanelOpacity: String(getConfiguredSplashProgressPanelOpacity()),
+    }),
+  })).catch(() => undefined);
+  splashVisiblePromise = showSplashWindowWhenReady(window, splashLoadPromise, splashReadyToShowPromise);
   window.on('closed', () => {
     if (splashWindow === window) {
       splashWindow = null;
@@ -720,6 +817,52 @@ function waitForMinimumSplashDuration(): Promise<void> {
   });
 }
 
+function waitForSplashAssetsReady(window: BrowserWindow, loadPromise: Promise<unknown>): Promise<void> {
+  return loadPromise
+    .then(async () => {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) {
+        return;
+      }
+
+      await window.webContents.executeJavaScript(SPLASH_ASSETS_READY_SCRIPT, true);
+    })
+    .catch(() => undefined);
+}
+
+function waitForSplashFirstFrameReady(
+  window: BrowserWindow,
+  loadPromise: Promise<unknown>,
+  readyToShowPromise: Promise<void>,
+): Promise<void> {
+  return Promise.race([
+    Promise.all([
+      waitForSplashAssetsReady(window, loadPromise),
+      readyToShowPromise,
+    ]).then(() => undefined),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, SPLASH_ASSETS_READY_TIMEOUT_MS);
+    }),
+  ]);
+}
+
+function showSplashWindowWhenReady(
+  window: BrowserWindow,
+  loadPromise: Promise<unknown>,
+  readyToShowPromise: Promise<void>,
+): Promise<void> {
+  return waitForSplashFirstFrameReady(window, loadPromise, readyToShowPromise).then(() => {
+    if (splashWindow !== window || window.isDestroyed()) {
+      return;
+    }
+
+    window.show();
+  });
+}
+
+function waitForVisibleSplashDuration(): Promise<void> {
+  return splashVisiblePromise.then(() => waitForMinimumSplashDuration());
+}
+
 function waitForWorkspaceReady(): Promise<void> {
   return Promise.race([
     workspaceReadyPromise,
@@ -730,7 +873,7 @@ function waitForWorkspaceReady(): Promise<void> {
 }
 
 function showMainWindowWhenReady(window: BrowserWindow, splash: BrowserWindow): void {
-  void Promise.all([waitForWindowReady(window), waitForMinimumSplashDuration(), waitForWorkspaceReady()]).then(() => {
+  void Promise.all([waitForWindowReady(window), waitForVisibleSplashDuration(), waitForWorkspaceReady()]).then(() => {
     if (mainWindow === window) {
       applyPendingProjectWindowVisibilityState(window);
       window.show();
@@ -784,6 +927,7 @@ if (!singleInstanceLock) {
     getProjectWindowState,
     applyProjectWindowState,
     markWorkspaceReady,
+    updateTrayNotifications,
   );
 
   app.whenReady().then(() => {

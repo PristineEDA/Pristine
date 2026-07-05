@@ -955,6 +955,11 @@ export type PersistedSettingsOptions = {
   minimapEnabled?: boolean;
   notificationDismissSeconds?: number;
   progressHideCompleted?: boolean;
+  splashScrimIntensity?: number;
+  splashProgressVisible?: boolean;
+  splashProgressGlassVisible?: boolean;
+  splashProgressWidth?: 'quarter' | 'half' | 'full';
+  splashProgressPanelOpacity?: number;
   renderControlCharacters?: boolean;
   renderWhitespace?: string;
   scrollBeyondLastLine?: boolean;
@@ -985,6 +990,11 @@ export function mockPersistedSettingsConfig(options: PersistedSettingsOptions = 
     minimapEnabled: true,
     notificationDismissSeconds: 5,
     progressHideCompleted: true,
+    splashScrimIntensity: 1,
+    splashProgressVisible: true,
+    splashProgressGlassVisible: true,
+    splashProgressWidth: 'full' as const,
+    splashProgressPanelOpacity: 0.45,
     renderControlCharacters: false,
     renderWhitespace: 'selection',
     scrollBeyondLastLine: false,
@@ -1041,6 +1051,16 @@ export function mockPersistedSettingsConfig(options: PersistedSettingsOptions = 
         return persisted.notificationDismissSeconds;
       case 'progress.hideCompleted':
         return persisted.progressHideCompleted;
+      case 'workbench.splashScrimIntensity':
+        return persisted.splashScrimIntensity;
+      case 'workbench.splashProgressVisible':
+        return persisted.splashProgressVisible;
+      case 'workbench.splashProgressGlassVisible':
+        return persisted.splashProgressGlassVisible;
+      case 'workbench.splashProgressWidth':
+        return persisted.splashProgressWidth;
+      case 'workbench.splashProgressPanelOpacity':
+        return persisted.splashProgressPanelOpacity;
       case 'editor.renderControlCharacters':
         return persisted.renderControlCharacters;
       case 'editor.renderWhitespace':

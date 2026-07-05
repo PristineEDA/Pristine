@@ -7,8 +7,19 @@
     <style>
       :root {
         color-scheme: dark;
-        --splash-background: #191a1b;
-        --splash-foreground: rgba(255, 255, 255, 0.88);
+        --splash-background: #2f6680;
+        --splash-foreground: rgba(255, 255, 255, 0.92);
+        --splash-muted: rgba(255, 255, 255, 0.66);
+        --splash-progress-track: rgba(255, 255, 255, 0.22);
+        --splash-progress-fill: #2acb7d;
+        --splash-progress-panel-alpha: 0.45;
+        --splash-progress-panel-width: calc(100% - 64px);
+        --splash-scrim-top-alpha: 0.46;
+        --splash-scrim-mid-alpha: 0.24;
+        --splash-scrim-bottom-alpha: 0.62;
+        --splash-scrim-left-alpha: 0.52;
+        --splash-scrim-center-alpha: 0.08;
+        --splash-scrim-right-alpha: 0.34;
         background: var(--splash-background);
       }
 
@@ -26,8 +37,6 @@
       }
 
       body {
-        display: grid;
-        place-items: center;
         font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       }
 
@@ -35,9 +44,14 @@
         position: relative;
         width: 100%;
         height: 100%;
+        overflow: hidden;
+        color: var(--splash-foreground);
+        background: var(--splash-background);
       }
 
-      .image {
+      .background-image {
+        position: absolute;
+        inset: 0;
         display: block;
         width: 100%;
         height: 100%;
@@ -46,14 +60,121 @@
         -webkit-user-drag: none;
       }
 
-      .label {
+      .scrim {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(
+            180deg,
+            rgba(4, 8, 14, var(--splash-scrim-top-alpha)),
+            rgba(4, 8, 14, var(--splash-scrim-mid-alpha)) 42%,
+            rgba(4, 8, 14, var(--splash-scrim-bottom-alpha))
+          ),
+          linear-gradient(
+            90deg,
+            rgba(4, 8, 14, var(--splash-scrim-left-alpha)),
+            rgba(4, 8, 14, var(--splash-scrim-center-alpha)) 54%,
+            rgba(4, 8, 14, var(--splash-scrim-right-alpha))
+          );
+      }
+
+      .brand {
         position: absolute;
         left: 28px;
-        bottom: 22px;
+        top: 24px;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 32px;
+        padding: 6px 10px 6px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 12px;
+        background: rgba(10, 14, 22, 0.34);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(14px);
+      }
+
+      .brand-logo {
+        display: block;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        object-fit: contain;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+
+      .brand-title {
+        font-size: 16px;
+        font-weight: 650;
+        line-height: 20px;
+        letter-spacing: 0;
         color: var(--splash-foreground);
-        font-size: 13px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+      }
+
+      .progress-shell {
+        position: absolute;
+        left: 50%;
+        bottom: 28px;
+        display: grid;
+        gap: 9px;
+        width: var(--splash-progress-panel-width);
+        max-width: calc(100% - 64px);
+        padding: 11px 13px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 12px;
+        background: rgba(10, 14, 22, var(--splash-progress-panel-alpha));
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+        backdrop-filter: blur(14px);
+        transform: translateX(-50%);
+      }
+
+      .progress-shell[data-progress-visible="false"] {
+        display: none;
+      }
+
+      :root[data-splash-progress-visible="false"] .progress-shell {
+        display: none;
+      }
+
+      :root[data-splash-progress-glass-visible="false"] .progress-shell {
+        border-color: transparent;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+      }
+
+      .progress-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        color: var(--splash-muted);
+        font-size: 12px;
+        line-height: 16px;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.32);
+      }
+
+      .progress-track {
+        position: relative;
+        height: 5px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--splash-progress-track);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+      }
+
+      .progress-bar {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, rgba(42, 203, 125, 0.78), var(--splash-progress-fill));
+        box-shadow: 0 0 18px rgba(42, 203, 125, 0.36);
+        transform: scaleX(0.08);
+        transform-origin: left center;
+        transition: transform 240ms ease-out;
       }
     </style>
     <script>
@@ -61,12 +182,70 @@
         const params = new URLSearchParams(window.location.search);
         const backgroundColor = params.get('backgroundColor');
         const themeKind = params.get('themeKind');
+        const scrimBaseAlpha = {
+          top: 0.46,
+          mid: 0.24,
+          bottom: 0.62,
+          left: 0.52,
+          center: 0.08,
+          right: 0.34,
+        };
+        const parseScrimIntensity = (value) => {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
+        };
+        const parseProgressVisible = (value) => value !== 'false';
+        const parseProgressGlassVisible = (value) => value !== 'false';
+        const parseProgressPanelOpacity = (value) => {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0.45;
+        };
+        const parseProgressWidth = (value) => {
+          if (value === 'quarter' || value === 'half' || value === 'full') {
+            return value;
+          }
+
+          return 'full';
+        };
+        const getProgressWidthValue = (value) => {
+          switch (value) {
+            case 'quarter':
+              return '25%';
+            case 'half':
+              return '50%';
+            case 'full':
+            default:
+              return 'calc(100% - 64px)';
+          }
+        };
+        const scrimIntensity = parseScrimIntensity(params.get('splashScrimIntensity'));
+        const progressVisible = parseProgressVisible(params.get('splashProgressVisible'));
+        const progressGlassVisible = parseProgressGlassVisible(params.get('splashProgressGlassVisible'));
+        const progressWidth = parseProgressWidth(params.get('splashProgressWidth'));
+        const progressPanelOpacity = parseProgressPanelOpacity(params.get('splashProgressPanelOpacity'));
+        const applyScrimIntensity = (intensity) => {
+          Object.entries(scrimBaseAlpha).forEach(([key, alpha]) => {
+            document.documentElement.style.setProperty(
+              `--splash-scrim-${key}-alpha`,
+              String(alpha * intensity),
+            );
+          });
+          document.documentElement.dataset.splashScrimIntensity = String(intensity);
+        };
+
+        applyScrimIntensity(scrimIntensity);
+        document.documentElement.style.setProperty('--splash-progress-panel-alpha', String(progressPanelOpacity));
+        document.documentElement.style.setProperty('--splash-progress-panel-width', getProgressWidthValue(progressWidth));
+        document.documentElement.dataset.splashProgressVisible = String(progressVisible);
+        document.documentElement.dataset.splashProgressGlassVisible = String(progressGlassVisible);
+        document.documentElement.dataset.splashProgressWidth = progressWidth;
+        document.documentElement.dataset.splashProgressPanelOpacity = String(progressPanelOpacity);
 
         if (themeKind === 'light' || themeKind === 'dark') {
           document.documentElement.style.colorScheme = themeKind;
           document.documentElement.style.setProperty(
             '--splash-foreground',
-            themeKind === 'light' ? 'rgba(15, 23, 42, 0.86)' : 'rgba(255, 255, 255, 0.88)',
+            themeKind === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(255, 255, 255, 0.92)',
           );
         }
 
@@ -74,13 +253,175 @@
           document.documentElement.style.setProperty('--splash-background', backgroundColor);
           document.documentElement.style.background = backgroundColor;
         }
+
+        const waitForImageLoad = (image) => new Promise((resolve) => {
+          if (!image) {
+            resolve(false);
+            return;
+          }
+
+          if (image.complete && image.naturalWidth > 0) {
+            resolve(true);
+            return;
+          }
+
+          const complete = () => {
+            resolve(Boolean(image.complete && image.naturalWidth > 0));
+          };
+
+          image.addEventListener('load', complete, { once: true });
+          image.addEventListener('error', complete, { once: true });
+        });
+
+        const waitForImageReady = async (image) => {
+          const loaded = await waitForImageLoad(image);
+          if (!loaded) {
+            return false;
+          }
+
+          if (typeof image.decode === 'function') {
+            try {
+              await image.decode();
+            } catch {
+              return false;
+            }
+          }
+
+          return Boolean(image.complete && image.naturalWidth > 0);
+        };
+
+        const waitForPaintOpportunity = () => new Promise((resolve) => {
+          let settled = false;
+          const complete = () => {
+            if (settled) {
+              return;
+            }
+
+            settled = true;
+            resolve();
+          };
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(complete);
+          });
+          setTimeout(complete, 120);
+        });
+
+        const waitForSplashAssetsReady = () => new Promise((resolve) => {
+          const waitForDomReady = () => {
+            const backgroundImage = document.querySelector('[data-testid="splash-background-image"]');
+            const brandLogo = document.querySelector('[data-testid="splash-brand-logo"]');
+
+            Promise.all([
+              waitForImageReady(backgroundImage),
+              waitForImageReady(brandLogo),
+            ]).then(async ([backgroundReady, logoReady]) => {
+              const assetsReady = Boolean(backgroundReady && logoReady);
+              if (assetsReady) {
+                await waitForPaintOpportunity();
+              }
+
+              document.documentElement.dataset.splashAssetsReady = String(assetsReady);
+              resolve(assetsReady);
+            });
+          };
+
+          if (document.readyState === 'loading') {
+            window.addEventListener('DOMContentLoaded', waitForDomReady, { once: true });
+            return;
+          }
+
+          waitForDomReady();
+        });
+
+        window.__pristineSplashAssetsReady = waitForSplashAssetsReady;
+
+        window.addEventListener('DOMContentLoaded', () => {
+          const scrim = document.querySelector('[data-testid="splash-scrim"]');
+          const progress = document.querySelector('[data-testid="splash-progress"]');
+          const progressBar = document.querySelector('[data-testid="splash-progress-bar"]');
+          const progressValue = document.querySelector('[data-testid="splash-progress-value"]');
+          let value = 8;
+          let lastTimestamp = performance.now();
+
+          if (scrim) {
+            scrim.setAttribute('data-scrim-intensity', String(scrimIntensity));
+          }
+
+          const updateProgress = (timestamp) => {
+            const delta = Math.max(0, timestamp - lastTimestamp);
+            lastTimestamp = timestamp;
+            const remaining = 92 - value;
+            value = Math.min(92, value + Math.max(0.08, remaining * 0.012) * (delta / 16.67));
+            const roundedValue = Math.round(value);
+
+          if (progress) {
+            progress.setAttribute('data-progress-visible', String(progressVisible));
+            progress.setAttribute('data-progress-glass-visible', String(progressGlassVisible));
+            progress.setAttribute('data-progress-width', progressWidth);
+            progress.setAttribute('data-progress-panel-opacity', progressPanelOpacity.toFixed(2));
+            progress.setAttribute('aria-valuenow', String(roundedValue));
+          }
+
+            if (progressBar) {
+              progressBar.style.transform = `scaleX(${value / 100})`;
+            }
+
+            if (progressValue) {
+              progressValue.textContent = `${roundedValue}%`;
+            }
+
+            requestAnimationFrame(updateProgress);
+          };
+
+          requestAnimationFrame(updateProgress);
+          void waitForSplashAssetsReady();
+        });
       })();
     </script>
   </head>
   <body>
     <main class="frame" data-testid="splash-screen" aria-label="Pristine splash screen">
-      <!-- <img class="image" src="./splash.png" alt="Pristine splash image" /> -->
-      <div class="label">Pristine IDE</div>
+      <img
+        alt=""
+        aria-hidden="true"
+        class="background-image"
+        data-testid="splash-background-image"
+        draggable="false"
+        src="./generated/splash/splash-background.png"
+      />
+      <div class="scrim" data-testid="splash-scrim" aria-hidden="true"></div>
+      <section class="brand" aria-label="Pristine">
+        <img
+          alt="Pristine"
+          class="brand-logo"
+          data-testid="splash-brand-logo"
+          draggable="false"
+          src="./generated/logo/logo-32.png"
+        />
+        <div class="brand-title" data-testid="splash-brand-title">Pristine</div>
+      </section>
+      <section
+        aria-label="Loading Pristine"
+        aria-valuemax="100"
+        aria-valuemin="0"
+        aria-valuenow="8"
+        class="progress-shell"
+        data-progress-panel-opacity="0.45"
+        data-progress-glass-visible="true"
+        data-progress-width="full"
+        data-progress-visible="true"
+        data-testid="splash-progress"
+        role="progressbar"
+      >
+        <div class="progress-meta">
+          <span>Restoring workspace</span>
+          <span data-testid="splash-progress-value">8%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" data-testid="splash-progress-bar"></div>
+        </div>
+      </section>
     </main>
   </body>
-  </html>
+</html>

@@ -10,6 +10,7 @@ const releaseScriptPath = path.join(repoRoot, 'scripts', 'release-version.mjs')
 const workflowPath = path.join(repoRoot, '.github', 'workflows', 'ci.yml')
 const prepareEngineScriptPath = path.join(repoRoot, 'scripts', 'prepare-pristine-engine.mjs')
 const engineRemoteSourceHelperPath = path.join(repoRoot, 'scripts', 'pristine-engine-remote-source.mjs')
+const prepareAssetsScriptPath = path.join(repoRoot, 'scripts', 'prepare-assets.mjs')
 const electronBuilderConfigPath = path.join(repoRoot, 'electron-builder.yml')
 const preparePackageAppScriptPath = path.join(repoRoot, 'scripts', 'prepare-package-app.mjs')
 const hookPath = path.join(repoRoot, '.githooks', 'pre-commit')
@@ -321,5 +322,15 @@ describe('release workflow contract', () => {
     expect(preparePackageAppScript).toMatch(/win:\r?\n  icon: icon\.ico/)
     expect(preparePackageAppScript).toMatch(/linux:\r?\n  icon: icon\.png/)
     expect(preparePackageAppScript).toMatch(/mac:\r?\n  icon: icon\.icns/)
+  })
+
+  it('prepares the generated splash background from pristine-res splash assets', () => {
+    const prepareAssetsScript = fs.readFileSync(prepareAssetsScriptPath, 'utf8')
+
+    expect(prepareAssetsScript).toContain('greek-lighthouse-masked-santorini-hillside-village-strict.png')
+    expect(prepareAssetsScript).toContain("path.join(generatedSplashDir, 'splash-background.png')")
+    expect(prepareAssetsScript).toContain("'splash',")
+    expect(prepareAssetsScript).toContain("'official',")
+    expect(prepareAssetsScript).toContain('https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/splash/official')
   })
 })

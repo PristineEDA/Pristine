@@ -22,6 +22,7 @@ const activeNotifications = new Map<string, Electron.Notification>();
 const closeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let history: NotificationRecord[] = [];
 let getMainWindowForNotifications: (() => BrowserWindow | null) | null = null;
+let onNotificationHistoryChanged: ((records: NotificationRecord[]) => void) | null = null;
 let nextNotificationId = 1;
 const PRISTINE_NOTIFICATION_TITLE = 'Pristine';
 const DEFAULT_ACTION_NOTIFICATION_ACTIONS: NotificationAction[] = [
@@ -106,6 +107,7 @@ function normalizePublishInput(input: unknown): NotificationPublishInput {
 
 function broadcastHistoryChanged(): void {
   const payload = getNotificationHistory();
+  onNotificationHistoryChanged?.(payload);
 
   BrowserWindow.getAllWindows().forEach((window) => {
     if (window.isDestroyed() || window.webContents.isDestroyed()) {
@@ -114,6 +116,32 @@ function broadcastHistoryChanged(): void {
 
     window.webContents.send(StreamChannels.NOTIFICATIONS_HISTORY_CHANGED, payload);
   });
+}
+
+function markNotificationRead(id: string): void {
+  let changed = false;
+  const now = Date.now();
+
+  history = history.map((record) => {
+    if (record.id !== id || record.readAt !== undefined) {
+      return record;
+    }
+
+    changed = true;
+    return {
+      ...record,
+      readAt: now,
+    };
+  });
+
+  if (changed) {
+    broadcastHistoryChanged();
+  }
+}
+
+function markNotificationReadAndFocus(id: string): void {
+  markNotificationRead(id);
+  focusMainWindow();
 }
 
 function focusMainWindow(): void {
@@ -250,8 +278,8 @@ function showNativeNotification(record: NotificationRecord): void {
     const notification = new Notification(createNativeNotificationOptions(record));
 
     activeNotifications.set(record.id, notification);
-    notification.once('action', focusMainWindow);
-    notification.once('click', focusMainWindow);
+    notification.once('action', () => markNotificationReadAndFocus(record.id));
+    notification.once('click', () => markNotificationReadAndFocus(record.id));
     notification.once('close', () => {
       activeNotifications.delete(record.id);
       const timer = closeTimers.get(record.id);
@@ -321,6 +349,7 @@ export function getNotificationHistory(): NotificationRecord[] {
 
 export function resetNotificationServiceForTests(): void {
   history = [];
+  onNotificationHistoryChanged = null;
   activeNotifications.forEach((notification) => notification.close());
   activeNotifications.clear();
   closeTimers.forEach((timer) => clearTimeout(timer));
@@ -328,8 +357,12 @@ export function resetNotificationServiceForTests(): void {
   nextNotificationId = 1;
 }
 
-export function registerNotificationHandlers(getMainWindow: () => BrowserWindow | null): void {
+export function registerNotificationHandlers(
+  getMainWindow: () => BrowserWindow | null,
+  onHistoryChanged: (records: NotificationRecord[]) => void = () => undefined,
+): void {
   getMainWindowForNotifications = getMainWindow;
+  onNotificationHistoryChanged = onHistoryChanged;
   app.setName(PRISTINE_NOTIFICATION_TITLE);
 
   if (process.platform === 'win32') {

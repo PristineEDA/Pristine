@@ -605,6 +605,58 @@ async function waitForStartupWindow(
   return startupWindow;
 }
 
+async function expectSplashVisuals(
+  page: Page,
+  options: {
+    progressPanelOpacity?: string;
+    requireProgressLayoutAttributes?: boolean;
+    scrimIntensity?: string;
+  } = {},
+) {
+  const requireProgressLayoutAttributes = options.requireProgressLayoutAttributes ?? true;
+  const backgroundImage = page.getByTestId('splash-background-image');
+  const brandLogo = page.getByTestId('splash-brand-logo');
+  const brandTitle = page.getByTestId('splash-brand-title');
+  const scrim = page.getByTestId('splash-scrim');
+  const progress = page.getByTestId('splash-progress');
+  const progressBar = page.getByTestId('splash-progress-bar');
+
+  await expect(backgroundImage).toBeVisible();
+  await expect(brandLogo).toBeVisible();
+  await expect(brandTitle).toHaveText('Pristine');
+  await expect(page.locator('html')).toHaveAttribute('data-splash-assets-ready', 'true');
+  await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '1');
+  await expect(progress).toBeVisible();
+  await expect(progress).toHaveAttribute('data-progress-visible', 'true');
+  if (requireProgressLayoutAttributes) {
+    await expect(progress).toHaveAttribute('data-progress-glass-visible', 'true');
+    await expect(progress).toHaveAttribute('data-progress-width', 'full');
+  }
+  await expect(progress).toHaveAttribute('data-progress-panel-opacity', options.progressPanelOpacity ?? '0.45');
+  await expect(progressBar).toBeVisible();
+
+  await expect.poll(
+    async () => backgroundImage.evaluate((element) => {
+      const image = element as { complete?: boolean; naturalWidth?: number };
+      return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+    }),
+    { timeout: UI_READY_TIMEOUT_MS },
+  ).toBe(true);
+  await expect.poll(
+    async () => brandLogo.evaluate((element) => {
+      const image = element as { complete?: boolean; naturalWidth?: number };
+      return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+    }),
+    { timeout: UI_READY_TIMEOUT_MS },
+  ).toBe(true);
+
+  const initialProgressValue = Number(await progress.getAttribute('aria-valuenow') ?? '0');
+  await expect.poll(
+    async () => Number(await progress.getAttribute('aria-valuenow') ?? '0'),
+    { timeout: 3000 },
+  ).toBeGreaterThan(initialProgressValue);
+}
+
 async function getWindowByTitle(app: Awaited<ReturnType<typeof electron.launch>>, title: string) {
   const titledWindows = await getIdentifiedWindows(app);
 
@@ -2123,8 +2175,18 @@ test('app launches and shows main UI', async () => {
   await waitForStartupWorkspaceReady(window, projectRoot);
   await ensureExplorerVisible(window);
 
+  const menuLogo = window.getByTestId('menu-app-logo-image');
   const mainContentStack = window.getByTestId('main-content-stack');
   const explorerPanel = window.getByTestId('panel-left-panel');
+  await expect(menuLogo).toBeVisible();
+  await expect(menuLogo).toHaveAttribute('src', /(?:\.\/)?generated\/logo\/logo-32\.png$/);
+  await expect.poll(
+    async () => menuLogo.evaluate((element) => {
+      const image = element as { complete?: boolean; naturalWidth?: number };
+      return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+    }),
+    { timeout: UI_READY_TIMEOUT_MS },
+  ).toBe(true);
   await expect(explorerPanel).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   await expect(window.getByTestId('code-view-explorer')).toHaveAttribute('data-code-viewer-layout-mode', 'minimal');
   await expect(window.getByTestId('left-panel-header')).toHaveAttribute('data-code-viewer-layout-mode', 'minimal');
@@ -2159,9 +2221,11 @@ test('splash window hands off to the main window after the startup delay', async
   const launchStartedAt = Date.now();
   const splashMidpointCheckMs = 2000;
   const { app, windowPromise } = await launchAppForSplashHandoff();
+  const splashWindow = await waitForStartupWindow(app, 'splash');
 
   await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash')).toBe(true);
   await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(false);
+  await expectSplashVisuals(splashWindow);
 
   const elapsedBeforeMidpointCheck = Date.now() - launchStartedAt;
   if (elapsedBeforeMidpointCheck < splashMidpointCheckMs) {
@@ -2228,10 +2292,12 @@ test('restored maximized project keeps the splash visible until the startup dela
   const launchStartedAt = Date.now();
   const splashMidpointCheckMs = 2000;
   const { app, windowPromise } = await launchAppForSplashHandoff({ projectRoot: null });
+  const splashWindow = await waitForStartupWindow(app, 'splash');
 
   try {
     await expect.poll(async () => isStartupBrowserWindowVisible(app, 'splash')).toBe(true);
     await expect.poll(async () => isStartupBrowserWindowVisible(app, 'main')).toBe(false);
+    await expectSplashVisuals(splashWindow);
 
     const elapsedBeforeMidpointCheck = Date.now() - launchStartedAt;
     if (elapsedBeforeMidpointCheck < splashMidpointCheckMs) {
@@ -2262,7 +2328,25 @@ test('packaged Windows app keeps the splash handoff working during startup', asy
   test.skip(process.platform !== 'win32', 'Packaged splash E2E runs on Windows only');
   test.skip(!packagedWindowsExecutablePath, 'Run pnpm run package:win before executing packaged splash E2E');
 
-  const { app, window } = await launchPackagedWindowsApp();
+  if (!packagedWindowsExecutablePath) {
+    throw new Error('Packaged Windows executable not found');
+  }
+
+  const userDataPath = getE2EUserDataPath();
+  prepareE2EUserDataPath(userDataPath);
+
+  const app = await electron.launch({
+    executablePath: packagedWindowsExecutablePath,
+    env: {
+      ...process.env,
+      PRISTINE_E2E: '1',
+      PRISTINE_PROJECT_ROOT: fixtureWorkspace,
+      PRISTINE_USER_DATA_PATH: userDataPath,
+    },
+  });
+  const splashWindow = await waitForStartupWindow(app, 'splash');
+  await expectSplashVisuals(splashWindow, { requireProgressLayoutAttributes: false });
+  const window = await waitForStartupWindow(app, 'main');
   const mainBrowserWindow = await app.browserWindow(window);
 
   await expect.poll(() => app.windows().length, { timeout: 15000 }).toBe(1);
@@ -4192,6 +4276,103 @@ test('settings dialog supports subpage navigation and global search', async () =
   await openSettingsPage(window, 'appearance');
   await expect(window.getByTestId('settings-nav-appearance')).toHaveAttribute('aria-current', 'page');
   await expect(window.getByTestId('settings-theme-combobox')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
+  await expect(window.getByTestId('settings-splash-section-grid')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-overlay-column')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-column')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-overlay-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-visible-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-glass-visible-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-width-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-opacity-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-column')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview')).toBeVisible();
+  const splashSectionGridBox = await window.getByTestId('settings-splash-section-grid').boundingBox();
+  const splashOverlayColumnBox = await window.getByTestId('settings-splash-overlay-column').boundingBox();
+  const splashProgressColumnBox = await window.getByTestId('settings-splash-progress-column').boundingBox();
+  const splashPreviewColumnBox = await window.getByTestId('settings-splash-preview-column').boundingBox();
+  expect(splashSectionGridBox).not.toBeNull();
+  expect(splashOverlayColumnBox).not.toBeNull();
+  expect(splashProgressColumnBox).not.toBeNull();
+  expect(splashPreviewColumnBox).not.toBeNull();
+  await expect(window.getByTestId('settings-splash-overlay-card')).toContainText('Splash overlay intensity');
+  if (
+    splashProgressColumnBox!.x > splashOverlayColumnBox!.x + 1
+    && splashPreviewColumnBox!.x > splashProgressColumnBox!.x + 1
+  ) {
+    expect(splashProgressColumnBox!.x).toBeGreaterThan(splashOverlayColumnBox!.x);
+    expect(splashPreviewColumnBox!.x).toBeGreaterThan(splashProgressColumnBox!.x);
+  } else {
+    expect(Math.abs(splashProgressColumnBox!.x - splashOverlayColumnBox!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(splashPreviewColumnBox!.x - splashProgressColumnBox!.x)).toBeLessThanOrEqual(1);
+    expect(splashProgressColumnBox!.y).toBeGreaterThan(splashOverlayColumnBox!.y);
+    expect(splashPreviewColumnBox!.y).toBeGreaterThan(splashProgressColumnBox!.y);
+  }
+  const splashPreviewBox = await window.getByTestId('settings-splash-preview').boundingBox();
+  expect(splashPreviewBox).not.toBeNull();
+  expect(splashPreviewBox!.x + splashPreviewBox!.width).toBeLessThanOrEqual(
+    splashSectionGridBox!.x + splashSectionGridBox!.width + 1,
+  );
+  expect(Math.abs((splashPreviewBox!.width / splashPreviewBox!.height) - (16 / 9))).toBeLessThan(0.03);
+  await expect(window.getByTestId('settings-splash-preview-background')).toHaveAttribute(
+    'src',
+    './generated/splash/splash-background.png',
+  );
+  await expect(window.getByTestId('settings-splash-preview-logo')).toHaveAttribute(
+    'src',
+    './generated/logo/logo-32.png',
+  );
+  await expect.poll(async () => window.getByTestId('settings-splash-preview-background').evaluate((element) => {
+    const image = element as { complete?: boolean; naturalWidth?: number };
+    return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+  })).toBe(true);
+  await expect.poll(async () => window.getByTestId('settings-splash-preview-logo').evaluate((element) => {
+    const image = element as { complete?: boolean; naturalWidth?: number };
+    return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
+  })).toBe(true);
+  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '1.00');
+  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect(window.getByTestId('settings-splash-progress-glass-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect(window.getByTestId('settings-splash-progress-width-select')).toContainText('Full width');
+  await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('45%');
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'full');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-glass-visible', 'true');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-width', 'full');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '0.45');
+  const fullProgressPanelBox = await window.getByTestId('settings-splash-preview-progress-panel').boundingBox();
+  expect(fullProgressPanelBox).not.toBeNull();
+  await window.getByTestId('settings-splash-scrim-slider').getByRole('slider').focus();
+  await window.keyboard.press('Home');
+  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('0%');
+  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.00');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashScrimIntensity')).toBe(0);
+  await window.getByTestId('settings-splash-progress-panel-opacity-slider').getByRole('slider').focus();
+  await window.keyboard.press('End');
+  await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('100%');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '1.00');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressPanelOpacity')).toBe(1);
+  await selectComboboxOption(
+    window,
+    'settings-splash-progress-width-select',
+    'settings-splash-progress-width-option-half',
+  );
+  await expect(window.getByTestId('settings-splash-progress-width-select')).toContainText('1/2 screen');
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'half');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-width', 'half');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressWidth')).toBe('half');
+  const halfProgressPanelBox = await window.getByTestId('settings-splash-preview-progress-panel').boundingBox();
+  expect(halfProgressPanelBox).not.toBeNull();
+  expect(halfProgressPanelBox!.width).toBeLessThan(fullProgressPanelBox!.width * 0.75);
+  await setSwitchChecked(window.getByTestId('settings-splash-progress-glass-visible-switch'), false);
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-glass-visible', 'false');
+  await expect(window.getByTestId('settings-splash-progress-panel-opacity-slider')).toHaveAttribute('data-disabled');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressGlassVisible')).toBe(false);
+  await setSwitchChecked(window.getByTestId('settings-splash-progress-visible-switch'), false);
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeHidden();
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressVisible')).toBe(false);
 
   await openSettingsPage(window, 'editor');
   await expect(window.getByTestId('settings-nav-editor')).toHaveAttribute('aria-current', 'page');

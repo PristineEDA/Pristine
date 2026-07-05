@@ -21,6 +21,7 @@ export interface NotificationRecord {
   expiresAt: number;
   id: string;
   level: NotificationLevel;
+  readAt?: number;
   title: string;
   variant: NotificationVariant;
 }

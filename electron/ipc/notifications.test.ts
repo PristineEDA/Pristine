@@ -9,6 +9,11 @@ interface MockBrowserWindow {
   };
 }
 
+interface MockNotificationInstance {
+  emit: (event: string) => void;
+  options: Electron.NotificationConstructorOptions;
+}
+
 const {
   mockHandle,
   mockGetAllWindows,
@@ -16,6 +21,7 @@ const {
   mockSetName,
   mockNotificationShow,
   mockNotificationClose,
+  mockNotificationInstances,
   mockCreateAppLogoNativeImage,
   mockGetAppLogoPath,
 } = vi.hoisted(() => ({
@@ -25,8 +31,9 @@ const {
   mockSetName: vi.fn(),
   mockNotificationShow: vi.fn(),
   mockNotificationClose: vi.fn(),
+  mockNotificationInstances: [] as MockNotificationInstance[],
   mockCreateAppLogoNativeImage: vi.fn<(size?: number) => { kind: string }>(() => ({ kind: 'app-logo-native-image' })),
-  mockGetAppLogoPath: vi.fn<(size?: number) => string | null>(() => 'C:\\Pristine\\logo-v1-64.png'),
+  mockGetAppLogoPath: vi.fn<(size?: number) => string | null>(() => 'C:\\Pristine\\logo-64.png'),
 }));
 
 class NotificationMock {
@@ -37,6 +44,7 @@ class NotificationMock {
 
   constructor(options: Electron.NotificationConstructorOptions) {
     this.options = options;
+    mockNotificationInstances.push(this as MockNotificationInstance);
   }
 
   once(event: string, listener: () => void) {
@@ -100,9 +108,10 @@ describe('notification IPC handlers', () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     vi.clearAllMocks();
+    mockNotificationInstances.length = 0;
     mockGetAllWindows.mockReturnValue([]);
     NotificationMock.isSupported.mockReturnValue(true);
-    mockGetAppLogoPath.mockReturnValue('C:\\Pristine\\logo-v1-64.png');
+    mockGetAppLogoPath.mockReturnValue('C:\\Pristine\\logo-64.png');
     delete process.env['PRISTINE_E2E'];
   });
 
@@ -155,6 +164,7 @@ describe('notification IPC handlers', () => {
       title: 'Warn',
       variant: 'standard',
     });
+    expect(record).not.toHaveProperty('readAt');
     expect(mockNotificationShow).toHaveBeenCalledWith(expect.objectContaining({
       body: 'Warn\nTiming drift',
       icon: { kind: 'app-logo-native-image' },
@@ -165,6 +175,63 @@ describe('notification IPC handlers', () => {
 
     vi.advanceTimersByTime(2_000);
     expect(mockNotificationClose).toHaveBeenCalled();
+  });
+
+  it('marks a native notification as read when the system notification is clicked', async () => {
+    const send = vi.fn();
+    const onHistoryChanged = vi.fn();
+    mockGetAllWindows.mockReturnValue([
+      {
+        isDestroyed: () => false,
+        webContents: {
+          isDestroyed: () => false,
+          send,
+        },
+      },
+    ]);
+
+    const { registerNotificationHandlers } = await importModule();
+    registerNotificationHandlers(() => null, onHistoryChanged);
+
+    const publish = getHandler(AsyncChannels.NOTIFICATIONS_PUBLISH);
+    const getHistory = getHandler(AsyncChannels.NOTIFICATIONS_GET_HISTORY);
+    const record = await publish({}, { level: 'info', title: 'Info' }) as { id: string };
+
+    expect(mockNotificationInstances).toHaveLength(1);
+    const unreadHistory = await getHistory({}) as Array<{ id: string; readAt?: number }>;
+    expect(unreadHistory).toEqual([expect.objectContaining({ id: record.id })]);
+    expect(unreadHistory[0]).not.toHaveProperty('readAt');
+
+    vi.setSystemTime(11_000);
+    mockNotificationInstances[0]?.emit('click');
+
+    const history = await getHistory({}) as Array<{ id: string; readAt?: number }>;
+    expect(history).toEqual([expect.objectContaining({ id: record.id, readAt: 11_000 })]);
+    expect(onHistoryChanged).toHaveBeenLastCalledWith(history);
+    expect(send).toHaveBeenLastCalledWith(StreamChannels.NOTIFICATIONS_HISTORY_CHANGED, history);
+  });
+
+  it('marks a native notification as read when a system notification action is clicked', async () => {
+    const { registerNotificationHandlers } = await importModule();
+    registerNotificationHandlers(() => null);
+
+    const publish = getHandler(AsyncChannels.NOTIFICATIONS_PUBLISH);
+    const getHistory = getHandler(AsyncChannels.NOTIFICATIONS_GET_HISTORY);
+    const record = await publish({}, {
+      level: 'warning',
+      title: 'Warning',
+      variant: 'actions',
+    }) as { id: string };
+
+    vi.setSystemTime(12_000);
+    mockNotificationInstances[0]?.emit('action');
+
+    await expect(getHistory({})).resolves.toEqual([
+      expect.objectContaining({
+        id: record.id,
+        readAt: 12_000,
+      }),
+    ]);
   });
 
   it('uses Windows toast XML with action buttons for action-style native notifications', async () => {
@@ -195,7 +262,7 @@ describe('notification IPC handlers', () => {
       expect(toastXml).toContain('You missed messages in OpenPencil from Discord');
       expect(toastXml).toContain('Mark as Read');
       expect(toastXml).toContain('Delete');
-      expect(toastXml).toContain('file:///C:/Pristine/logo-v1-64.png');
+      expect(toastXml).toContain('file:///C:/Pristine/logo-64.png');
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
     }

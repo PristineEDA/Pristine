@@ -17,6 +17,7 @@ import { registerProjectHandlers } from './project.js';
 import type { WindowCloseDecision } from '../../src/app/window/windowClose.js';
 import type { FloatingInfoWindowMode } from '../../src/app/window/floatingInfoWindow.js';
 import type { ProjectWindowState } from '../../types/project.js';
+import type { NotificationRecord } from '../../types/notification.js';
 
 export function setProjectRoot(root: string | null): void {
   const resolved = root ? path.resolve(root) : null;
@@ -37,6 +38,7 @@ export function registerAllHandlers(
   getProjectWindowState: () => ProjectWindowState | null = () => null,
   applyProjectWindowState: (windowState: ProjectWindowState | null | undefined) => void = () => undefined,
   markWorkspaceReady: () => void = () => undefined,
+  onNotificationHistoryChanged: (records: NotificationRecord[]) => void = () => undefined,
 ): void {
   registerPlatformHandler();
   registerDialogHandlers(getMainWindow);
@@ -55,7 +57,7 @@ export function registerAllHandlers(
   registerTerminalHandlers(getMainWindow);
   registerWslHandlers();
   registerConfigHandlers();
-  registerNotificationHandlers(getMainWindow);
+  registerNotificationHandlers(getMainWindow, onNotificationHistoryChanged);
   registerProjectHandlers(getMainWindow, setProjectRoot, getProjectWindowState, applyProjectWindowState);
   registerAuthHandlers();
   registerNoticeHandlers();
