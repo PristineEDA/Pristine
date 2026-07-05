@@ -35,6 +35,8 @@ const WORKBENCH_COLOR_THEME_KIND_CONFIG_KEY = 'workbench.colorThemeKind';
 const WORKBENCH_FLOATING_INFO_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.floatingInfoBackgroundColor';
 const WORKBENCH_SPLASH_SCRIM_INTENSITY_CONFIG_KEY = 'workbench.splashScrimIntensity';
 const WORKBENCH_SPLASH_PROGRESS_VISIBLE_CONFIG_KEY = 'workbench.splashProgressVisible';
+const WORKBENCH_SPLASH_PROGRESS_GLASS_VISIBLE_CONFIG_KEY = 'workbench.splashProgressGlassVisible';
+const WORKBENCH_SPLASH_PROGRESS_WIDTH_CONFIG_KEY = 'workbench.splashProgressWidth';
 const WORKBENCH_SPLASH_PROGRESS_PANEL_OPACITY_CONFIG_KEY = 'workbench.splashProgressPanelOpacity';
 const WORKBENCH_SPLASH_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.splashBackgroundColor';
 const WORKBENCH_STARTUP_BACKGROUND_COLOR_CONFIG_KEY = 'workbench.startupBackgroundColor';
@@ -51,6 +53,8 @@ const DEFAULT_SPLASH_BACKGROUND_COLOR = '#2F6680';
 const DEFAULT_FLOATING_INFO_BACKGROUND_COLOR = '#121314';
 const DEFAULT_SPLASH_SCRIM_INTENSITY = 1;
 const DEFAULT_SPLASH_PROGRESS_VISIBLE = true;
+const DEFAULT_SPLASH_PROGRESS_GLASS_VISIBLE = true;
+const DEFAULT_SPLASH_PROGRESS_WIDTH = 'full';
 const DEFAULT_SPLASH_PROGRESS_PANEL_OPACITY = 0.45;
 const SPLASH_ASSETS_READY_SCRIPT = `(() => {
   const waitForAssetsReady = window.__pristineSplashAssetsReady;
@@ -58,6 +62,7 @@ const SPLASH_ASSETS_READY_SCRIPT = `(() => {
 })()`;
 
 type ThemeKind = 'light' | 'dark';
+type SplashProgressWidth = 'quarter' | 'half' | 'full';
 
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
@@ -252,6 +257,21 @@ function getConfiguredSplashScrimIntensity(): number {
 function getConfiguredSplashProgressVisible(): boolean {
   const value = getConfigValue(WORKBENCH_SPLASH_PROGRESS_VISIBLE_CONFIG_KEY);
   return typeof value === 'boolean' ? value : DEFAULT_SPLASH_PROGRESS_VISIBLE;
+}
+
+function getConfiguredSplashProgressGlassVisible(): boolean {
+  const value = getConfigValue(WORKBENCH_SPLASH_PROGRESS_GLASS_VISIBLE_CONFIG_KEY);
+  return typeof value === 'boolean' ? value : DEFAULT_SPLASH_PROGRESS_GLASS_VISIBLE;
+}
+
+function parseSplashProgressWidth(value: unknown): SplashProgressWidth {
+  return value === 'quarter' || value === 'half' || value === 'full'
+    ? value
+    : DEFAULT_SPLASH_PROGRESS_WIDTH;
+}
+
+function getConfiguredSplashProgressWidth(): SplashProgressWidth {
+  return parseSplashProgressWidth(getConfigValue(WORKBENCH_SPLASH_PROGRESS_WIDTH_CONFIG_KEY));
 }
 
 function parseSplashProgressPanelOpacity(value: unknown): number {
@@ -709,6 +729,8 @@ function createSplashWindow(): BrowserWindow {
     query: createRendererSurfaceQuery(backgroundColor, {
       splashScrimIntensity: String(getConfiguredSplashScrimIntensity()),
       splashProgressVisible: String(getConfiguredSplashProgressVisible()),
+      splashProgressGlassVisible: String(getConfiguredSplashProgressGlassVisible()),
+      splashProgressWidth: getConfiguredSplashProgressWidth(),
       splashProgressPanelOpacity: String(getConfiguredSplashProgressPanelOpacity()),
     }),
   })).catch(() => undefined);

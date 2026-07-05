@@ -561,8 +561,10 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/public[\\/]splash\.html$/), {
       query: {
         backgroundColor: '#2F6680',
+        splashProgressGlassVisible: 'true',
         splashProgressPanelOpacity: '0.45',
         splashProgressVisible: 'true',
+        splashProgressWidth: 'full',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },
@@ -817,6 +819,8 @@ describe('electron main entry', () => {
         'workbench.colorThemeKind': 'light',
         'workbench.splashScrimIntensity': 0.42,
         'workbench.splashProgressVisible': false,
+        'workbench.splashProgressGlassVisible': false,
+        'workbench.splashProgressWidth': 'half',
         'workbench.splashProgressPanelOpacity': 0.72,
         'workbench.startupBackgroundColor': '#112233',
         'workbench.splashBackgroundColor': '#223344',
@@ -835,8 +839,10 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
       query: {
         backgroundColor: '#223344',
+        splashProgressGlassVisible: 'false',
         splashProgressPanelOpacity: '0.72',
         splashProgressVisible: 'false',
+        splashProgressWidth: 'half',
         splashScrimIntensity: '0.42',
         themeKind: 'light',
       },
@@ -849,6 +855,8 @@ describe('electron main entry', () => {
       configValues: {
         'workbench.splashScrimIntensity': 'invalid',
         'workbench.splashProgressVisible': 'invalid',
+        'workbench.splashProgressGlassVisible': 'invalid',
+        'workbench.splashProgressWidth': 'invalid',
         'workbench.splashProgressPanelOpacity': 'invalid',
       },
     });
@@ -858,8 +866,10 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/splash\.html$/), {
       query: {
         backgroundColor: '#2F6680',
+        splashProgressGlassVisible: 'true',
         splashProgressPanelOpacity: '0.45',
         splashProgressVisible: 'true',
+        splashProgressWidth: 'full',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },
@@ -895,8 +905,10 @@ describe('electron main entry', () => {
     expect(splashWindow.loadFile).toHaveBeenCalledWith(expect.stringMatching(/dist[\\/]splash\.html$/), {
       query: {
         backgroundColor: '#2F6680',
+        splashProgressGlassVisible: 'true',
         splashProgressPanelOpacity: '0.45',
         splashProgressVisible: 'true',
+        splashProgressWidth: 'full',
         splashScrimIntensity: '1',
         themeKind: 'dark',
       },

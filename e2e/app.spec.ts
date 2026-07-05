@@ -605,7 +605,15 @@ async function waitForStartupWindow(
   return startupWindow;
 }
 
-async function expectSplashVisuals(page: Page, options: { progressPanelOpacity?: string; scrimIntensity?: string } = {}) {
+async function expectSplashVisuals(
+  page: Page,
+  options: {
+    progressPanelOpacity?: string;
+    requireProgressLayoutAttributes?: boolean;
+    scrimIntensity?: string;
+  } = {},
+) {
+  const requireProgressLayoutAttributes = options.requireProgressLayoutAttributes ?? true;
   const backgroundImage = page.getByTestId('splash-background-image');
   const brandLogo = page.getByTestId('splash-brand-logo');
   const brandTitle = page.getByTestId('splash-brand-title');
@@ -620,6 +628,10 @@ async function expectSplashVisuals(page: Page, options: { progressPanelOpacity?:
   await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '1');
   await expect(progress).toBeVisible();
   await expect(progress).toHaveAttribute('data-progress-visible', 'true');
+  if (requireProgressLayoutAttributes) {
+    await expect(progress).toHaveAttribute('data-progress-glass-visible', 'true');
+    await expect(progress).toHaveAttribute('data-progress-width', 'full');
+  }
   await expect(progress).toHaveAttribute('data-progress-panel-opacity', options.progressPanelOpacity ?? '0.45');
   await expect(progressBar).toBeVisible();
 
@@ -2333,7 +2345,7 @@ test('packaged Windows app keeps the splash handoff working during startup', asy
     },
   });
   const splashWindow = await waitForStartupWindow(app, 'splash');
-  await expectSplashVisuals(splashWindow);
+  await expectSplashVisuals(splashWindow, { requireProgressLayoutAttributes: false });
   const window = await waitForStartupWindow(app, 'main');
   const mainBrowserWindow = await app.browserWindow(window);
 
@@ -4267,34 +4279,35 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
   await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
   await expect(window.getByTestId('settings-splash-section-grid')).toBeVisible();
-  await expect(window.getByTestId('settings-splash-placeholder-column')).toBeVisible();
-  await expect(window.getByTestId('settings-splash-controls-column')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-overlay-column')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-column')).toBeVisible();
   await expect(window.getByTestId('settings-splash-overlay-card')).toBeVisible();
   await expect(window.getByTestId('settings-splash-progress-visible-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-glass-visible-card')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-progress-width-card')).toBeVisible();
   await expect(window.getByTestId('settings-splash-progress-opacity-card')).toBeVisible();
   await expect(window.getByTestId('settings-splash-preview-column')).toBeVisible();
   await expect(window.getByTestId('settings-splash-preview')).toBeVisible();
   const splashSectionGridBox = await window.getByTestId('settings-splash-section-grid').boundingBox();
-  const splashPlaceholderColumnBox = await window.getByTestId('settings-splash-placeholder-column').boundingBox();
-  const splashControlsColumnBox = await window.getByTestId('settings-splash-controls-column').boundingBox();
+  const splashOverlayColumnBox = await window.getByTestId('settings-splash-overlay-column').boundingBox();
+  const splashProgressColumnBox = await window.getByTestId('settings-splash-progress-column').boundingBox();
   const splashPreviewColumnBox = await window.getByTestId('settings-splash-preview-column').boundingBox();
   expect(splashSectionGridBox).not.toBeNull();
-  expect(splashPlaceholderColumnBox).not.toBeNull();
-  expect(splashControlsColumnBox).not.toBeNull();
+  expect(splashOverlayColumnBox).not.toBeNull();
+  expect(splashProgressColumnBox).not.toBeNull();
   expect(splashPreviewColumnBox).not.toBeNull();
-  await expect(window.getByTestId('settings-splash-placeholder-column')).toContainText('Splash controls');
   await expect(window.getByTestId('settings-splash-overlay-card')).toContainText('Splash overlay intensity');
   if (
-    splashControlsColumnBox!.x > splashPlaceholderColumnBox!.x + 1
-    && splashPreviewColumnBox!.x > splashControlsColumnBox!.x + 1
+    splashProgressColumnBox!.x > splashOverlayColumnBox!.x + 1
+    && splashPreviewColumnBox!.x > splashProgressColumnBox!.x + 1
   ) {
-    expect(splashControlsColumnBox!.x).toBeGreaterThan(splashPlaceholderColumnBox!.x);
-    expect(splashPreviewColumnBox!.x).toBeGreaterThan(splashControlsColumnBox!.x);
+    expect(splashProgressColumnBox!.x).toBeGreaterThan(splashOverlayColumnBox!.x);
+    expect(splashPreviewColumnBox!.x).toBeGreaterThan(splashProgressColumnBox!.x);
   } else {
-    expect(Math.abs(splashControlsColumnBox!.x - splashPlaceholderColumnBox!.x)).toBeLessThanOrEqual(1);
-    expect(Math.abs(splashPreviewColumnBox!.x - splashControlsColumnBox!.x)).toBeLessThanOrEqual(1);
-    expect(splashControlsColumnBox!.y).toBeGreaterThan(splashPlaceholderColumnBox!.y);
-    expect(splashPreviewColumnBox!.y).toBeGreaterThan(splashControlsColumnBox!.y);
+    expect(Math.abs(splashProgressColumnBox!.x - splashOverlayColumnBox!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(splashPreviewColumnBox!.x - splashProgressColumnBox!.x)).toBeLessThanOrEqual(1);
+    expect(splashProgressColumnBox!.y).toBeGreaterThan(splashOverlayColumnBox!.y);
+    expect(splashPreviewColumnBox!.y).toBeGreaterThan(splashProgressColumnBox!.y);
   }
   const splashPreviewBox = await window.getByTestId('settings-splash-preview').boundingBox();
   expect(splashPreviewBox).not.toBeNull();
@@ -4320,9 +4333,17 @@ test('settings dialog supports subpage navigation and global search', async () =
   })).toBe(true);
   await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '1.00');
   await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect(window.getByTestId('settings-splash-progress-glass-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect(window.getByTestId('settings-splash-progress-width-select')).toContainText('Full width');
   await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('45%');
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'full');
   await expect(window.getByTestId('settings-splash-preview-progress-panel')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-glass-visible', 'true');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-width', 'full');
   await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '0.45');
+  const fullProgressPanelBox = await window.getByTestId('settings-splash-preview-progress-panel').boundingBox();
+  expect(fullProgressPanelBox).not.toBeNull();
   await window.getByTestId('settings-splash-scrim-slider').getByRole('slider').focus();
   await window.keyboard.press('Home');
   await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('0%');
@@ -4333,8 +4354,24 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('100%');
   await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-panel-opacity', '1.00');
   await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressPanelOpacity')).toBe(1);
+  await selectComboboxOption(
+    window,
+    'settings-splash-progress-width-select',
+    'settings-splash-progress-width-option-half',
+  );
+  await expect(window.getByTestId('settings-splash-progress-width-select')).toContainText('1/2 screen');
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'half');
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-width', 'half');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressWidth')).toBe('half');
+  const halfProgressPanelBox = await window.getByTestId('settings-splash-preview-progress-panel').boundingBox();
+  expect(halfProgressPanelBox).not.toBeNull();
+  expect(halfProgressPanelBox!.width).toBeLessThan(fullProgressPanelBox!.width * 0.75);
+  await setSwitchChecked(window.getByTestId('settings-splash-progress-glass-visible-switch'), false);
+  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toHaveAttribute('data-progress-glass-visible', 'false');
+  await expect(window.getByTestId('settings-splash-progress-panel-opacity-slider')).toHaveAttribute('data-disabled');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressGlassVisible')).toBe(false);
   await setSwitchChecked(window.getByTestId('settings-splash-progress-visible-switch'), false);
-  await expect(window.getByTestId('settings-splash-preview-progress-panel')).toBeHidden();
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeHidden();
   await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressVisible')).toBe(false);
 
   await openSettingsPage(window, 'editor');
