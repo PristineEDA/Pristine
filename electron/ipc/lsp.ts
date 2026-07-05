@@ -106,7 +106,7 @@ interface LspSession {
 
 const SYSTEMVERILOG_LANGUAGE_ID = 'systemverilog';
 const CLIENT_NAME = 'Pristine Monaco LSP';
-const CLIENT_VERSION = '0.0.1';
+const CLIENT_VERSION = '0.1.0';
 const LSP_REQUEST_TIMEOUT_MS = 10_000;
 const LSP_INITIALIZE_TIMEOUT_MS = 30_000;
 const LSP_OUTLINE_TIMEOUT_MS = 30_000;
