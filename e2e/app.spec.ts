@@ -4266,9 +4266,22 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-theme-combobox')).toBeVisible();
   await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
   await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
+  await expect(window.getByTestId('settings-splash-section-grid')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-controls-column')).toBeVisible();
+  await expect(window.getByTestId('settings-splash-preview-column')).toBeVisible();
   await expect(window.getByTestId('settings-splash-preview')).toBeVisible();
+  const splashSectionGridBox = await window.getByTestId('settings-splash-section-grid').boundingBox();
+  const splashControlsColumnBox = await window.getByTestId('settings-splash-controls-column').boundingBox();
+  const splashPreviewColumnBox = await window.getByTestId('settings-splash-preview-column').boundingBox();
+  expect(splashSectionGridBox).not.toBeNull();
+  expect(splashControlsColumnBox).not.toBeNull();
+  expect(splashPreviewColumnBox).not.toBeNull();
+  expect(splashPreviewColumnBox!.x).toBeGreaterThan(splashControlsColumnBox!.x);
   const splashPreviewBox = await window.getByTestId('settings-splash-preview').boundingBox();
   expect(splashPreviewBox).not.toBeNull();
+  expect(splashPreviewBox!.x + splashPreviewBox!.width).toBeLessThanOrEqual(
+    splashSectionGridBox!.x + splashSectionGridBox!.width + 1,
+  );
   expect(Math.abs((splashPreviewBox!.width / splashPreviewBox!.height) - (16 / 9))).toBeLessThan(0.03);
   await expect(window.getByTestId('settings-splash-preview-background')).toHaveAttribute(
     'src',
