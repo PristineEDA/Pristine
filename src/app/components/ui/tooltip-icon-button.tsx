@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tool
 interface TooltipIconButtonProps {
   content: React.ReactNode;
   children: React.ReactNode;
+  delayDuration?: number;
   side?: React.ComponentProps<typeof TooltipContent>['side'];
   sideOffset?: number;
   wrapTrigger?: boolean;
@@ -12,12 +13,13 @@ interface TooltipIconButtonProps {
 export function TooltipIconButton({
   content,
   children,
+  delayDuration = 0,
   side = 'top',
   sideOffset = 6,
   wrapTrigger = false,
 }: TooltipIconButtonProps) {
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delayDuration={delayDuration}>
       <Tooltip>
         <TooltipTrigger asChild>
           {wrapTrigger ? <span className="inline-flex">{children}</span> : children}

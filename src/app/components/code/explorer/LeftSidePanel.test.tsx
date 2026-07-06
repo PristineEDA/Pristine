@@ -305,12 +305,12 @@ describe('LeftSidePanel', () => {
     expect(screen.getByTestId('rtl-regression-group-count-cpu')).toHaveClass('leading-4');
     expect(screen.getByTestId('rtl-regression-group-count-cpu').parentElement).toHaveClass('items-baseline');
     expect(screen.getByTestId('rtl-regression-group-ip')).toHaveTextContent('ip');
-    expect(screen.getByTestId('rtl-regression-group-count-ip')).toHaveTextContent('(8)');
+    expect(screen.getByTestId('rtl-regression-group-count-ip')).toHaveTextContent('(14)');
     expect(screen.getByTestId('rtl-regression-group-perf')).toHaveTextContent('perf');
-    expect(screen.getByTestId('rtl-regression-group-count-perf')).toHaveTextContent('(8)');
+    expect(screen.getByTestId('rtl-regression-group-count-perf')).toHaveTextContent('(10)');
 
     expect(screen.getByTestId('rtl-regression-test-row-cpu-reset-vector')).toHaveTextContent('reset_vector_boot');
-    expect(within(screen.getByTestId('rtl-regression-test-row-cpu-reset-vector')).getByTestId('rtl-regression-status-passed')).toHaveAccessibleName('正确');
+    expect(within(screen.getByTestId('rtl-regression-test-row-cpu-reset-vector')).getByTestId('rtl-regression-status-passed')).toHaveAccessibleName('passed');
     expect(screen.getAllByTestId('rtl-regression-status-error').length).toBeGreaterThan(0);
     expect(screen.getAllByTestId('rtl-regression-status-idle').length).toBeGreaterThan(0);
     expect(screen.queryByText('正确')).not.toBeInTheDocument();
@@ -334,18 +334,32 @@ describe('LeftSidePanel', () => {
 
     expect(useRtlRegressionStore.getState().activeRun).toEqual({
       mode: 'simulation',
+      scope: 'test',
       testId: 'cpu-reset-vector',
     });
-    expect(within(screen.getByTestId('rtl-regression-test-row-cpu-reset-vector')).getByTestId('rtl-regression-status-running')).toHaveAccessibleName('进行中');
+    expect(within(screen.getByTestId('rtl-regression-test-row-cpu-reset-vector')).getByTestId('rtl-regression-status-running')).toHaveAccessibleName('running');
     expect(screen.queryByText('进行中')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop simulation reset_vector_boot' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Stop debug reset_vector_boot' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeDisabled();
 
-    await testUser.click(screen.getByTestId('rtl-regression-action-debug-cpu-reset-vector'));
+    await testUser.click(screen.getByTestId('rtl-regression-action-simulate-cpu-reset-vector'));
 
     expect(useRtlRegressionStore.getState().activeRun).toBeNull();
     expect(screen.getByRole('button', { name: 'Run simulation reset_vector_boot' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeInTheDocument();
+
+    await testUser.click(screen.getByTestId('rtl-regression-group-action-simulate-ip'));
+    expect(useRtlRegressionStore.getState().activeRun).toEqual({
+      groupId: 'ip',
+      mode: 'simulation',
+      scope: 'group',
+    });
+    expect(within(screen.getByTestId('rtl-regression-test-row-ip-uart-loopback')).getByTestId('rtl-regression-status-running')).toHaveAccessibleName('running');
+    expect(screen.getByRole('button', { name: 'Stop simulation ip' })).toBeInTheDocument();
+    expect(screen.getByTestId('rtl-regression-action-simulate-ip-uart-loopback')).toBeDisabled();
+
+    await testUser.click(screen.getByTestId('rtl-regression-group-action-simulate-ip'));
+    expect(useRtlRegressionStore.getState().activeRun).toBeNull();
   });
 
   it('persists selected real explorer nodes for project session restore', async () => {

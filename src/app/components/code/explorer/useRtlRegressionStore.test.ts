@@ -33,20 +33,49 @@ describe('useRtlRegressionStore', () => {
     expect(getStore().expandedGroups.cpu).toBe(true);
   });
 
-  it('starts mutually exclusive simulation and debug runs', () => {
+  it('starts one test run at a time until the active run stops', () => {
     getStore().startTestRun('cpu-reset-vector', 'simulation');
 
     expect(getStore().activeRun).toEqual({
       mode: 'simulation',
+      scope: 'test',
       testId: 'cpu-reset-vector',
     });
 
     getStore().startTestRun('cpu-reset-vector', 'debug');
 
     expect(getStore().activeRun).toEqual({
-      mode: 'debug',
+      mode: 'simulation',
+      scope: 'test',
       testId: 'cpu-reset-vector',
     });
+  });
+
+  it('starts and stops one group simulation run', () => {
+    getStore().startGroupRun('ip');
+
+    expect(getStore().activeRun).toEqual({
+      groupId: 'ip',
+      mode: 'simulation',
+      scope: 'group',
+    });
+
+    getStore().startTestRun('cpu-reset-vector', 'simulation');
+    expect(getStore().activeRun).toEqual({
+      groupId: 'ip',
+      mode: 'simulation',
+      scope: 'group',
+    });
+
+    getStore().stopGroupRun('cpu');
+    expect(getStore().activeRun).toEqual({
+      groupId: 'ip',
+      mode: 'simulation',
+      scope: 'group',
+    });
+
+    getStore().stopGroupRun('ip');
+    expect(getStore().activeRun).toBeNull();
   });
 
   it('stops the active run only when the requested test matches', () => {
@@ -55,6 +84,7 @@ describe('useRtlRegressionStore', () => {
 
     expect(getStore().activeRun).toEqual({
       mode: 'simulation',
+      scope: 'test',
       testId: 'cpu-reset-vector',
     });
 

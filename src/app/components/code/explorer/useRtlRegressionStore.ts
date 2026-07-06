@@ -3,10 +3,19 @@ import { RTL_REGRESSION_GROUP_IDS, type RtlRegressionGroupId } from './rtlRegres
 
 export type RtlRegressionRunMode = 'simulation' | 'debug';
 
-export interface RtlRegressionActiveRun {
+export interface RtlRegressionTestRun {
+  scope: 'test';
   mode: RtlRegressionRunMode;
   testId: string;
 }
+
+export interface RtlRegressionGroupRun {
+  groupId: RtlRegressionGroupId;
+  mode: 'simulation';
+  scope: 'group';
+}
+
+export type RtlRegressionActiveRun = RtlRegressionTestRun | RtlRegressionGroupRun;
 
 interface RtlRegressionState {
   activeRun: RtlRegressionActiveRun | null;
@@ -15,7 +24,9 @@ interface RtlRegressionState {
 
 interface RtlRegressionActions {
   resetRtlRegressionStoreForTests: () => void;
+  startGroupRun: (groupId: RtlRegressionGroupId) => void;
   startTestRun: (testId: string, mode: RtlRegressionRunMode) => void;
+  stopGroupRun: (groupId?: RtlRegressionGroupId) => void;
   stopTestRun: (testId?: string) => void;
   toggleGroup: (groupId: RtlRegressionGroupId) => void;
 }
@@ -44,12 +55,34 @@ export const useRtlRegressionStore = create<RtlRegressionStore>((set) => ({
   },
 
   startTestRun: (testId, mode) => {
-    set({ activeRun: { testId, mode } });
+    set((state) => (
+      state.activeRun
+        ? state
+        : { activeRun: { mode, scope: 'test', testId } }
+    ));
+  },
+
+  startGroupRun: (groupId) => {
+    set((state) => (
+      state.activeRun
+        ? state
+        : { activeRun: { groupId, mode: 'simulation', scope: 'group' } }
+    ));
   },
 
   stopTestRun: (testId) => {
     set((state) => {
-      if (!state.activeRun || (testId && state.activeRun.testId !== testId)) {
+      if (!state.activeRun || state.activeRun.scope !== 'test' || (testId && state.activeRun.testId !== testId)) {
+        return state;
+      }
+
+      return { activeRun: null };
+    });
+  },
+
+  stopGroupRun: (groupId) => {
+    set((state) => {
+      if (!state.activeRun || state.activeRun.scope !== 'group' || (groupId && state.activeRun.groupId !== groupId)) {
         return state;
       }
 

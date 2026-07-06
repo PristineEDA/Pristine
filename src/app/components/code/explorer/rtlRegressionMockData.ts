@@ -40,6 +40,12 @@ export const RTL_REGRESSION_GROUPS: readonly RtlRegressionGroup[] = [
       { id: 'ip-dma-burst', name: 'dma_burst_alignment', status: 'passed' },
       { id: 'ip-axi-lite', name: 'axi_lite_backpressure', status: 'idle' },
       { id: 'ip-reset-sync', name: 'reset_sync_assertion', status: 'passed' },
+      { id: 'ip-pwm-duty', name: 'pwm_duty_cycle_sweep', status: 'idle' },
+      { id: 'ip-watchdog-reset', name: 'watchdog_reset_window', status: 'passed' },
+      { id: 'ip-apb-wait', name: 'apb_wait_state_matrix', status: 'idle' },
+      { id: 'ip-eth-mdio', name: 'ethernet_mdio_access', status: 'error' },
+      { id: 'ip-usb-enumeration', name: 'usb_enumeration_smoke', status: 'passed' },
+      { id: 'ip-sram-ecc', name: 'sram_ecc_single_bit', status: 'idle' },
     ],
   },
   {
@@ -54,6 +60,8 @@ export const RTL_REGRESSION_GROUPS: readonly RtlRegressionGroup[] = [
       { id: 'perf-irq-throughput', name: 'irq_throughput_sweep', status: 'idle' },
       { id: 'perf-dma-copy', name: 'dma_copy_bandwidth', status: 'passed' },
       { id: 'perf-branch-mix', name: 'branch_mix_regression', status: 'idle' },
+      { id: 'perf-cache-thrash', name: 'cache_thrash_window', status: 'error' },
+      { id: 'perf-boot-time', name: 'boot_time_budget', status: 'passed' },
     ],
   },
 ];

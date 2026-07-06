@@ -242,6 +242,21 @@ describe('MenuBar settings', () => {
     expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressVisible', false);
   });
 
+  it('uses the default splash overlay and progress visibility settings', async () => {
+    const user = userEvent.setup();
+
+    renderMenuBar();
+
+    await user.click(screen.getByTestId('menu-settings-button'));
+    expect(await screen.findByTestId('settings-dialog')).toBeVisible();
+    await openSettingsPage(user, 'appearance');
+
+    expect(screen.getByTestId('settings-splash-scrim-value')).toHaveTextContent('25%');
+    expect(screen.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.25');
+    expect(screen.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByTestId('settings-splash-preview-progress-shell')).toHaveClass('hidden');
+  });
+
   it('navigates settings subpages and searches across pages', async () => {
     const user = userEvent.setup();
 

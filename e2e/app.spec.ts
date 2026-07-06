@@ -608,11 +608,13 @@ async function waitForStartupWindow(
 async function expectSplashVisuals(
   page: Page,
   options: {
+    progressVisible?: boolean;
     progressPanelOpacity?: string;
     requireProgressLayoutAttributes?: boolean;
     scrimIntensity?: string;
   } = {},
 ) {
+  const progressVisible = options.progressVisible ?? false;
   const requireProgressLayoutAttributes = options.requireProgressLayoutAttributes ?? true;
   const backgroundImage = page.getByTestId('splash-background-image');
   const brandLogo = page.getByTestId('splash-brand-logo');
@@ -625,15 +627,19 @@ async function expectSplashVisuals(
   await expect(brandLogo).toBeVisible();
   await expect(brandTitle).toHaveText('Pristine');
   await expect(page.locator('html')).toHaveAttribute('data-splash-assets-ready', 'true');
-  await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '1');
-  await expect(progress).toBeVisible();
-  await expect(progress).toHaveAttribute('data-progress-visible', 'true');
-  if (requireProgressLayoutAttributes) {
-    await expect(progress).toHaveAttribute('data-progress-glass-visible', 'true');
-    await expect(progress).toHaveAttribute('data-progress-width', 'full');
+  await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '0.25');
+  await expect(progress).toHaveAttribute('data-progress-visible', String(progressVisible));
+  if (progressVisible) {
+    await expect(progress).toBeVisible();
+    if (requireProgressLayoutAttributes) {
+      await expect(progress).toHaveAttribute('data-progress-glass-visible', 'true');
+      await expect(progress).toHaveAttribute('data-progress-width', 'full');
+    }
+    await expect(progress).toHaveAttribute('data-progress-panel-opacity', options.progressPanelOpacity ?? '0.45');
+    await expect(progressBar).toBeVisible();
+  } else {
+    await expect(progress).toBeHidden();
   }
-  await expect(progress).toHaveAttribute('data-progress-panel-opacity', options.progressPanelOpacity ?? '0.45');
-  await expect(progressBar).toBeVisible();
 
   await expect.poll(
     async () => backgroundImage.evaluate((element) => {
@@ -4294,7 +4300,7 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-nav-appearance')).toHaveAttribute('aria-current', 'page');
   await expect(window.getByTestId('settings-theme-combobox')).toBeVisible();
   await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
-  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
+  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('25%');
   await expect(window.getByTestId('settings-splash-section-grid')).toBeVisible();
   await expect(window.getByTestId('settings-splash-overlay-column')).toBeVisible();
   await expect(window.getByTestId('settings-splash-progress-column')).toBeVisible();
@@ -4348,11 +4354,15 @@ test('settings dialog supports subpage navigation and global search', async () =
     const image = element as { complete?: boolean; naturalWidth?: number };
     return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
   })).toBe(true);
-  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '1.00');
-  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.25');
+  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'unchecked');
   await expect(window.getByTestId('settings-splash-progress-glass-visible-switch')).toHaveAttribute('data-state', 'checked');
   await expect(window.getByTestId('settings-splash-progress-width-select')).toContainText('Full width');
   await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('45%');
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeHidden();
+  await setSwitchChecked(window.getByTestId('settings-splash-progress-visible-switch'), true);
+  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressVisible')).toBe(true);
   await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeVisible();
   await expect(window.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'full');
   await expect(window.getByTestId('settings-splash-preview-progress-panel')).toBeVisible();
@@ -4960,9 +4970,9 @@ test('left panel RTL regression lower tab renders mock suites and run controls',
     await expect(window.getByTestId('rtl-regression-group-cpu')).toContainText('cpu');
     await expect(window.getByTestId('rtl-regression-group-count-cpu')).toHaveText('(8)');
     await expect(window.getByTestId('rtl-regression-group-ip')).toContainText('ip');
-    await expect(window.getByTestId('rtl-regression-group-count-ip')).toHaveText('(8)');
+    await expect(window.getByTestId('rtl-regression-group-count-ip')).toHaveText('(14)');
     await expect(window.getByTestId('rtl-regression-group-perf')).toContainText('perf');
-    await expect(window.getByTestId('rtl-regression-group-count-perf')).toHaveText('(8)');
+    await expect(window.getByTestId('rtl-regression-group-count-perf')).toHaveText('(10)');
 
     const cpuTestRow = window.getByTestId('rtl-regression-test-row-cpu-reset-vector');
     await expect(cpuTestRow).toContainText('reset_vector_boot');
@@ -4978,14 +4988,14 @@ test('left panel RTL regression lower tab renders mock suites and run controls',
     await expect(window.getByRole('button', { name: 'Run simulation reset_vector_boot' })).toBeVisible();
     await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeVisible();
     await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').hover();
-    await expect(window.getByRole('tooltip', { name: 'simulate' })).toBeVisible();
+    await expect(window.getByRole('tooltip', { name: 'simulate' })).toBeVisible({ timeout: 4500 });
     await window.getByTestId('rtl-regression-action-debug-cpu-reset-vector').hover();
-    await expect(window.getByRole('tooltip', { name: 'debug' })).toBeVisible();
+    await expect(window.getByRole('tooltip', { name: 'debug' })).toBeVisible({ timeout: 4500 });
     await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').click();
     await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
     await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector')).not.toContainText('进行中');
     await expect(window.getByRole('button', { name: 'Stop simulation reset_vector_boot' })).toBeVisible();
-    await expect(window.getByRole('button', { name: 'Stop debug reset_vector_boot' })).toBeVisible();
+    await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeDisabled();
 
     await window.getByTestId('left-panel-secondary-tab-libraries').click();
     await expect(window.getByTestId('left-panel-libraries-placeholder')).toHaveText('Libraries is empty');
@@ -4993,9 +5003,18 @@ test('left panel RTL regression lower tab renders mock suites and run controls',
     await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
 
     await window.getByTestId('rtl-regression-test-row-cpu-reset-vector').hover();
-    await window.getByTestId('rtl-regression-action-debug-cpu-reset-vector').click();
+    await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').click();
     await expect(window.getByRole('button', { name: 'Run simulation reset_vector_boot' })).toBeVisible();
     await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeVisible();
+
+    await window.getByTestId('rtl-regression-group-ip').hover();
+    await window.getByTestId('rtl-regression-group-action-simulate-ip').click();
+    await expect(window.getByRole('button', { name: 'Stop simulation ip' })).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-ip-uart-loopback').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-action-simulate-ip-uart-loopback')).toBeDisabled();
+
+    await window.getByTestId('rtl-regression-group-action-simulate-ip').click();
+    await expect(window.getByRole('button', { name: 'Run simulation ip' })).toBeVisible();
   } finally {
     await app.close().catch(() => undefined);
   }

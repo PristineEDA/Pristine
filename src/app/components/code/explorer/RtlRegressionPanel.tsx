@@ -4,11 +4,11 @@ import {
   ChevronRight,
   CircleCheck,
   CircleDashed,
+  CirclePlay,
+  CircleStop,
   CircleX,
   ListChecks,
   LoaderCircle,
-  Play,
-  Square,
 } from 'lucide-react';
 import { memo } from 'react';
 import { cn } from '@/lib/utils';
@@ -18,10 +18,10 @@ import { RTL_REGRESSION_GROUPS, type RtlRegressionStatus, type RtlRegressionTest
 import { useRtlRegressionStore, type RtlRegressionRunMode } from './useRtlRegressionStore';
 
 const statusLabels: Record<RtlRegressionStatus, string> = {
-  error: '错误',
-  idle: '未开始',
-  passed: '正确',
-  running: '进行中',
+  error: 'error',
+  idle: 'idle',
+  passed: 'passed',
+  running: 'running',
 };
 
 const statusIconClassNames: Record<RtlRegressionStatus, string> = {
@@ -60,21 +60,27 @@ function StatusIndicator({ status }: StatusIndicatorProps) {
 
 interface TestRowProps {
   activeMode: RtlRegressionRunMode | null;
+  forceRunning?: boolean;
   onStart: (testId: string, mode: RtlRegressionRunMode) => void;
   onStop: (testId: string) => void;
+  runDisabled?: boolean;
   test: RtlRegressionTest;
 }
 
 const TestRow = memo(function TestRow({
   activeMode,
+  forceRunning = false,
   onStart,
   onStop,
+  runDisabled = false,
   test,
 }: TestRowProps) {
-  const isRunning = activeMode !== null;
+  const isRunning = activeMode !== null || forceRunning;
   const status: RtlRegressionStatus = isRunning ? 'running' : test.status;
-  const simulationLabel = isRunning ? `Stop simulation ${test.name}` : `Run simulation ${test.name}`;
-  const debugLabel = isRunning ? `Stop debug ${test.name}` : `Debug ${test.name}`;
+  const simulationLabel = activeMode === 'simulation' ? `Stop simulation ${test.name}` : `Run simulation ${test.name}`;
+  const debugLabel = activeMode === 'debug' ? `Stop debug ${test.name}` : `Debug ${test.name}`;
+  const simulationDisabled = forceRunning || runDisabled || activeMode === 'debug';
+  const debugDisabled = forceRunning || runDisabled || activeMode === 'simulation';
 
   return (
     <div
@@ -92,7 +98,7 @@ const TestRow = memo(function TestRow({
         data-testid={`rtl-regression-actions-${test.id}`}
         className="flex shrink-0 items-center gap-0 opacity-0 transition-opacity group-hover/test:opacity-100 group-focus-within/test:opacity-100"
       >
-        <TooltipIconButton content="simulate" side="bottom">
+        <TooltipIconButton content="simulate" delayDuration={3000} side="bottom">
           <Button
             type="button"
             variant="ghost"
@@ -100,11 +106,13 @@ const TestRow = memo(function TestRow({
             className={cn(
               'h-5 w-5 text-ide-text-muted hover:text-ide-text',
               activeMode === 'simulation' && 'text-ide-accent',
+              simulationDisabled && 'opacity-40 hover:text-ide-text-muted',
             )}
+            disabled={simulationDisabled}
             aria-label={simulationLabel}
             data-testid={`rtl-regression-action-simulate-${test.id}`}
             onClick={() => {
-              if (isRunning) {
+              if (activeMode === 'simulation') {
                 onStop(test.id);
                 return;
               }
@@ -112,10 +120,10 @@ const TestRow = memo(function TestRow({
               onStart(test.id, 'simulation');
             }}
           >
-            {isRunning ? <Square className="h-3.5 w-3.5" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
+            {activeMode === 'simulation' ? <CircleStop className="h-3.5 w-3.5" aria-hidden="true" /> : <CirclePlay className="h-3.5 w-3.5" aria-hidden="true" />}
           </Button>
         </TooltipIconButton>
-        <TooltipIconButton content="debug" side="bottom">
+        <TooltipIconButton content="debug" delayDuration={3000} side="bottom">
           <Button
             type="button"
             variant="ghost"
@@ -123,11 +131,13 @@ const TestRow = memo(function TestRow({
             className={cn(
               'h-5 w-5 text-ide-text-muted hover:text-ide-text',
               activeMode === 'debug' && 'text-ide-accent',
+              debugDisabled && 'opacity-40 hover:text-ide-text-muted',
             )}
+            disabled={debugDisabled}
             aria-label={debugLabel}
             data-testid={`rtl-regression-action-debug-${test.id}`}
             onClick={() => {
-              if (isRunning) {
+              if (activeMode === 'debug') {
                 onStop(test.id);
                 return;
               }
@@ -135,7 +145,7 @@ const TestRow = memo(function TestRow({
               onStart(test.id, 'debug');
             }}
           >
-            {isRunning ? <Square className="h-3.5 w-3.5" aria-hidden="true" /> : <BugPlay className="h-3.5 w-3.5" aria-hidden="true" />}
+            {activeMode === 'debug' ? <CircleStop className="h-3.5 w-3.5" aria-hidden="true" /> : <BugPlay className="h-3.5 w-3.5" aria-hidden="true" />}
           </Button>
         </TooltipIconButton>
       </div>
@@ -146,7 +156,9 @@ const TestRow = memo(function TestRow({
 export function RtlRegressionPanel() {
   const activeRun = useRtlRegressionStore((state) => state.activeRun);
   const expandedGroups = useRtlRegressionStore((state) => state.expandedGroups);
+  const startGroupRun = useRtlRegressionStore((state) => state.startGroupRun);
   const startTestRun = useRtlRegressionStore((state) => state.startTestRun);
+  const stopGroupRun = useRtlRegressionStore((state) => state.stopGroupRun);
   const stopTestRun = useRtlRegressionStore((state) => state.stopTestRun);
   const toggleGroup = useRtlRegressionStore((state) => state.toggleGroup);
 
@@ -165,6 +177,9 @@ export function RtlRegressionPanel() {
       >
         {RTL_REGRESSION_GROUPS.map((group) => {
           const expanded = expandedGroups[group.id];
+          const groupRunning = activeRun?.scope === 'group' && activeRun.groupId === group.id;
+          const groupActionDisabled = activeRun !== null && !groupRunning;
+          const groupActionLabel = groupRunning ? `Stop simulation ${group.label}` : `Run simulation ${group.label}`;
 
           return (
             <div key={group.id} role="none">
@@ -192,11 +207,38 @@ export function RtlRegressionPanel() {
                     ({group.tests.length})
                   </span>
                 </span>
+                <TooltipIconButton content="simulate" delayDuration={3000} side="bottom">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className={cn(
+                      'ml-auto h-5 w-5 text-ide-text-muted opacity-0 transition-opacity hover:text-ide-text group-hover:opacity-100 group-focus-within:opacity-100',
+                      groupRunning && 'text-ide-accent opacity-100',
+                      groupActionDisabled && 'opacity-40 hover:text-ide-text-muted group-hover:opacity-40 group-focus-within:opacity-40',
+                    )}
+                    disabled={groupActionDisabled}
+                    aria-label={groupActionLabel}
+                    data-testid={`rtl-regression-group-action-simulate-${group.id}`}
+                    onClick={() => {
+                      if (groupRunning) {
+                        stopGroupRun(group.id);
+                        return;
+                      }
+
+                      startGroupRun(group.id);
+                    }}
+                  >
+                    {groupRunning ? <CircleStop className="h-3.5 w-3.5" aria-hidden="true" /> : <CirclePlay className="h-3.5 w-3.5" aria-hidden="true" />}
+                  </Button>
+                </TooltipIconButton>
               </div>
               {expanded && group.tests.map((test) => (
                 <TestRow
                   key={test.id}
-                  activeMode={activeRun?.testId === test.id ? activeRun.mode : null}
+                  activeMode={activeRun?.scope === 'test' && activeRun.testId === test.id ? activeRun.mode : null}
+                  forceRunning={groupRunning}
+                  runDisabled={activeRun !== null && !(activeRun.scope === 'test' && activeRun.testId === test.id)}
                   test={test}
                   onStart={startTestRun}
                   onStop={stopTestRun}

@@ -563,9 +563,9 @@ describe('electron main entry', () => {
         backgroundColor: '#2F6680',
         splashProgressGlassVisible: 'true',
         splashProgressPanelOpacity: '0.45',
-        splashProgressVisible: 'true',
+        splashProgressVisible: 'false',
         splashProgressWidth: 'full',
-        splashScrimIntensity: '1',
+        splashScrimIntensity: '0.25',
         themeKind: 'dark',
       },
     });
@@ -700,6 +700,10 @@ describe('electron main entry', () => {
       expect.any(Buffer),
       { height: 32, scaleFactor: 1, width: 32 },
     );
+    const unreadBitmap = mocks.mockCreateFromBuffer.mock.calls[0]?.[0];
+    expect(Buffer.isBuffer(unreadBitmap)).toBe(true);
+    const bottomRightOffset = ((31 * 32) + 31) * 4;
+    expect((unreadBitmap as Buffer).subarray(bottomRightOffset, bottomRightOffset + 4)).toEqual(Buffer.from([0x44, 0x44, 0xef, 0xff]));
     expect(tray.setImage).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: 'native-image-buffer',
       sourceOptions: { height: 32, scaleFactor: 1, width: 32 },
@@ -868,9 +872,9 @@ describe('electron main entry', () => {
         backgroundColor: '#2F6680',
         splashProgressGlassVisible: 'true',
         splashProgressPanelOpacity: '0.45',
-        splashProgressVisible: 'true',
+        splashProgressVisible: 'false',
         splashProgressWidth: 'full',
-        splashScrimIntensity: '1',
+        splashScrimIntensity: '0.25',
         themeKind: 'dark',
       },
     });
@@ -907,9 +911,9 @@ describe('electron main entry', () => {
         backgroundColor: '#2F6680',
         splashProgressGlassVisible: 'true',
         splashProgressPanelOpacity: '0.45',
-        splashProgressVisible: 'true',
+        splashProgressVisible: 'false',
         splashProgressWidth: 'full',
-        splashScrimIntensity: '1',
+        splashScrimIntensity: '0.25',
         themeKind: 'dark',
       },
     });
