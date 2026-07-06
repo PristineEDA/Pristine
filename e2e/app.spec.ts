@@ -3744,29 +3744,46 @@ test('window controls toggle minimize and maximize state', async () => {
   const { app, window } = await launchApp();
   const browserWindow = await app.browserWindow(window);
 
-  const maximizeButton = window.getByTestId('window-control-maximize');
-  await expect(maximizeButton).toBeVisible();
-  await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
-  await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
-  await maximizeButton.click();
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(true);
-  await expect(maximizeButton).toHaveAttribute('aria-label', 'Restore Window');
-  await expect(maximizeButton.locator('svg.lucide-copy')).toBeVisible();
+  const focusMainWindow = async () => {
+    await browserWindow.evaluate((win) => {
+      if (win.isMinimized()) {
+        win.restore();
+      }
+      win.show();
+      win.focus();
+    });
+    await window.bringToFront();
+  };
 
-  await maximizeButton.click();
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(false);
-  await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
-  await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
+  try {
+    await focusMainWindow();
 
-  const minimizeButton = window.getByTestId('window-control-minimize');
-  await expect(minimizeButton).toBeVisible();
-  await minimizeButton.click();
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(true);
+    const maximizeButton = window.getByTestId('window-control-maximize');
+    await expect(maximizeButton).toBeVisible();
+    await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
+    await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
+    await maximizeButton.click();
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(true);
+    await expect(maximizeButton).toHaveAttribute('aria-label', 'Restore Window');
+    await expect(maximizeButton.locator('svg.lucide-copy')).toBeVisible();
 
-  await browserWindow.evaluate((win) => win.restore());
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(false);
+    await focusMainWindow();
+    await maximizeButton.click();
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(false);
+    await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
+    await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
 
-  await app.close();
+    const minimizeButton = window.getByTestId('window-control-minimize');
+    await expect(minimizeButton).toBeVisible();
+    await focusMainWindow();
+    await minimizeButton.click();
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(true);
+
+    await browserWindow.evaluate((win) => win.restore());
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(false);
+  } finally {
+    await app.close();
+  }
 });
 
 test('application menu expands on hover and stays visible when locked', async () => {

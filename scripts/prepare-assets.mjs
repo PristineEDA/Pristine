@@ -22,7 +22,7 @@ const defaultAssetUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-
 const assetUrl = process.env.PRISTINE_EMPTY_WALLPAPER_URL ?? defaultAssetUrl
 const defaultFontAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/fonts'
 const fontAssetBaseUrl = process.env.PRISTINE_FONT_ASSET_BASE_URL ?? defaultFontAssetBaseUrl
-const defaultLogoAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-letter-v3'
+const defaultLogoAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-official'
 const logoAssetBaseUrl = process.env.PRISTINE_LOGO_ASSET_BASE_URL ?? defaultLogoAssetBaseUrl
 const defaultSplashAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/splash/official'
 const splashAssetBaseUrl = process.env.PRISTINE_SPLASH_ASSET_BASE_URL ?? defaultSplashAssetBaseUrl
@@ -30,7 +30,7 @@ const defaultLocalResourceRoot = path.resolve(workspaceRoot, '..', 'pristine-res
 const localResourceRoot = process.env.PRISTINE_RES_LOCAL_DIR ?? defaultLocalResourceRoot
 const localWallpaperSourcePath = path.join(localResourceRoot, 'images', 'empty-wallpaper.png')
 const localFontSourceDir = path.join(localResourceRoot, 'fonts')
-const localLogoSourceDir = path.join(localResourceRoot, 'images', 'logo', 'logo-letter-v3')
+const localLogoSourceDir = path.join(localResourceRoot, 'images', 'logo', 'logo-official')
 const localSplashBackgroundSourcePath = path.join(
   localResourceRoot,
   'images',

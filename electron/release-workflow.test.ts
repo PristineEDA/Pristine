@@ -314,7 +314,12 @@ describe('release workflow contract', () => {
   it('uses generated Pristine logo assets for packaged Windows, Linux, and macOS icons', () => {
     const electronBuilderConfig = fs.readFileSync(electronBuilderConfigPath, 'utf8')
     const preparePackageAppScript = fs.readFileSync(preparePackageAppScriptPath, 'utf8')
+    const prepareAssetsScript = fs.readFileSync(prepareAssetsScriptPath, 'utf8')
 
+    expect(prepareAssetsScript).toContain('https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-official')
+    expect(prepareAssetsScript).toContain("'images', 'logo', 'logo-official'")
+    expect(prepareAssetsScript).not.toContain('images/logo/logo-letter-v3')
+    expect(prepareAssetsScript).not.toContain("'images', 'logo', 'logo-letter-v3'")
     expect(electronBuilderConfig).toMatch(/win:\r?\n  icon: icon\.ico/)
     expect(electronBuilderConfig).toMatch(/linux:\r?\n  icon: icon\.png/)
     expect(electronBuilderConfig).toMatch(/mac:\r?\n  icon: icon\.icns/)
