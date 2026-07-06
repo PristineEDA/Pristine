@@ -702,8 +702,15 @@ describe('electron main entry', () => {
     );
     const unreadBitmap = mocks.mockCreateFromBuffer.mock.calls[0]?.[0];
     expect(Buffer.isBuffer(unreadBitmap)).toBe(true);
+    const badgeCenterOffset = ((23 * 32) + 23) * 4;
+    expect((unreadBitmap as Buffer).subarray(badgeCenterOffset, badgeCenterOffset + 4)).toEqual(Buffer.from([0x44, 0x44, 0xef, 0xff]));
+    const rightTangentOffset = ((23 * 32) + 31) * 4;
+    expect((unreadBitmap as Buffer).subarray(rightTangentOffset, rightTangentOffset + 4)).toEqual(Buffer.from([0xff, 0xff, 0xff, 0xff]));
+    const bottomTangentOffset = ((31 * 32) + 23) * 4;
+    expect((unreadBitmap as Buffer).subarray(bottomTangentOffset, bottomTangentOffset + 4)).toEqual(Buffer.from([0xff, 0xff, 0xff, 0xff]));
     const bottomRightOffset = ((31 * 32) + 31) * 4;
-    expect((unreadBitmap as Buffer).subarray(bottomRightOffset, bottomRightOffset + 4)).toEqual(Buffer.from([0x44, 0x44, 0xef, 0xff]));
+    expect((unreadBitmap as Buffer).subarray(bottomRightOffset, bottomRightOffset + 4)).not.toEqual(Buffer.from([0x44, 0x44, 0xef, 0xff]));
+    expect((unreadBitmap as Buffer).subarray(bottomRightOffset, bottomRightOffset + 4)).not.toEqual(Buffer.from([0xff, 0xff, 0xff, 0xff]));
     expect(tray.setImage).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: 'native-image-buffer',
       sourceOptions: { height: 32, scaleFactor: 1, width: 32 },

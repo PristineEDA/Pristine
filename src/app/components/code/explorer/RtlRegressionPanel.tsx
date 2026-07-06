@@ -215,7 +215,7 @@ export function RtlRegressionPanel() {
                     className={cn(
                       'ml-auto h-5 w-5 text-ide-text-muted opacity-0 transition-opacity hover:text-ide-text group-hover:opacity-100 group-focus-within:opacity-100',
                       groupRunning && 'text-ide-accent opacity-100',
-                      groupActionDisabled && 'opacity-40 hover:text-ide-text-muted group-hover:opacity-40 group-focus-within:opacity-40',
+                      groupActionDisabled && 'hover:text-ide-text-muted group-hover:opacity-40 group-focus-within:opacity-40',
                     )}
                     disabled={groupActionDisabled}
                     aria-label={groupActionLabel}

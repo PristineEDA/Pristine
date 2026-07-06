@@ -51,10 +51,9 @@ export function createAppLogoUnreadNativeImage(size = 32): Electron.NativeImage 
 
     const dotRadius = Math.max(4, Math.round(Math.min(width, height) * 0.18));
     const strokeWidth = Math.max(1, Math.round(Math.min(width, height) * 0.06));
-    const edgeInset = Math.max(1, Math.round(dotRadius * 0.6));
-    const dotCenterX = width - edgeInset;
-    const dotCenterY = height - edgeInset;
     const outerRadius = dotRadius + strokeWidth;
+    const dotCenterX = width - outerRadius - 1;
+    const dotCenterY = height - outerRadius - 1;
     const outerRadiusSquared = outerRadius * outerRadius;
     const innerRadiusSquared = dotRadius * dotRadius;
 

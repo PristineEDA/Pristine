@@ -341,6 +341,9 @@ describe('LeftSidePanel', () => {
     expect(screen.queryByText('进行中')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop simulation reset_vector_boot' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeDisabled();
+    expect(screen.getByTestId('rtl-regression-group-action-simulate-ip')).toBeDisabled();
+    expect(screen.getByTestId('rtl-regression-group-action-simulate-ip')).toHaveClass('opacity-0');
+    expect(screen.getByTestId('rtl-regression-group-action-simulate-ip')).not.toHaveClass('opacity-40');
 
     await testUser.click(screen.getByTestId('rtl-regression-action-simulate-cpu-reset-vector'));
 
