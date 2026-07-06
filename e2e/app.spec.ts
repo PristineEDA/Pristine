@@ -4967,6 +4967,7 @@ test('left panel RTL regression lower tab renders mock suites and run controls',
 
     await window.getByTestId('left-panel-secondary-tab-rtl-regression').click();
     await expect(window.getByTestId('rtl-regression-panel')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-summary-count')).toHaveText('13/32');
     await expect(window.getByTestId('rtl-regression-group-cpu')).toContainText('cpu');
     await expect(window.getByTestId('rtl-regression-group-count-cpu')).toHaveText('(8)');
     await expect(window.getByTestId('rtl-regression-group-ip')).toContainText('ip');
@@ -4996,6 +4997,8 @@ test('left panel RTL regression lower tab renders mock suites and run controls',
     await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector')).not.toContainText('进行中');
     await expect(window.getByRole('button', { name: 'Stop simulation reset_vector_boot' })).toBeVisible();
     await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeDisabled();
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-ip').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-perf').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
 
     await window.getByTestId('left-panel-secondary-tab-libraries').click();
     await expect(window.getByTestId('left-panel-libraries-placeholder')).toHaveText('Libraries is empty');
@@ -5012,9 +5015,21 @@ test('left panel RTL regression lower tab renders mock suites and run controls',
     await expect(window.getByRole('button', { name: 'Stop simulation ip' })).toBeVisible();
     await expect(window.getByTestId('rtl-regression-test-row-ip-uart-loopback').getByTestId('rtl-regression-status-running')).toBeVisible();
     await expect(window.getByTestId('rtl-regression-action-simulate-ip-uart-loopback')).toBeDisabled();
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-cpu').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-perf').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
 
     await window.getByTestId('rtl-regression-group-action-simulate-ip').click();
     await expect(window.getByRole('button', { name: 'Run simulation ip' })).toBeVisible();
+
+    await window.getByTestId('rtl-regression-action-simulate-all').click();
+    await expect(window.getByRole('button', { name: 'Stop simulation RTL Regression' })).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-ip-uart-loopback').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-perf-coremark').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-cpu').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-ip').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await window.getByTestId('rtl-regression-action-simulate-all').click();
+    await expect(window.getByRole('button', { name: 'Run simulation RTL Regression' })).toBeVisible();
   } finally {
     await app.close().catch(() => undefined);
   }

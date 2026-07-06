@@ -31,6 +31,20 @@ const statusIconClassNames: Record<RtlRegressionStatus, string> = {
   running: 'text-ide-accent',
 };
 
+const regressionSummary = RTL_REGRESSION_GROUPS.reduce(
+  (summary, group) => {
+    for (const test of group.tests) {
+      summary.total += 1;
+      if (test.status === 'passed') {
+        summary.passed += 1;
+      }
+    }
+
+    return summary;
+  },
+  { passed: 0, total: 0 },
+);
+
 interface StatusIndicatorProps {
   status: RtlRegressionStatus;
 }
@@ -156,17 +170,53 @@ const TestRow = memo(function TestRow({
 export function RtlRegressionPanel() {
   const activeRun = useRtlRegressionStore((state) => state.activeRun);
   const expandedGroups = useRtlRegressionStore((state) => state.expandedGroups);
+  const startAllRun = useRtlRegressionStore((state) => state.startAllRun);
   const startGroupRun = useRtlRegressionStore((state) => state.startGroupRun);
   const startTestRun = useRtlRegressionStore((state) => state.startTestRun);
+  const stopAllRun = useRtlRegressionStore((state) => state.stopAllRun);
   const stopGroupRun = useRtlRegressionStore((state) => state.stopGroupRun);
   const stopTestRun = useRtlRegressionStore((state) => state.stopTestRun);
   const toggleGroup = useRtlRegressionStore((state) => state.toggleGroup);
+  const allRunning = activeRun?.scope === 'all';
+  const allActionDisabled = activeRun !== null && !allRunning;
+  const allActionLabel = allRunning ? 'Stop simulation RTL Regression' : 'Run simulation RTL Regression';
 
   return (
     <div data-testid="rtl-regression-panel" className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-ide-border/60 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-ide-text-muted">
         <ListChecks className="h-3.5 w-3.5 text-ide-accent" aria-hidden="true" />
         <span>RTL Regression</span>
+        <span
+          data-testid="rtl-regression-summary-count"
+          className="rounded-sm border border-ide-border/60 px-1.5 py-0.5 text-[10px] font-medium tracking-normal text-ide-text"
+        >
+          {regressionSummary.passed}/{regressionSummary.total}
+        </span>
+        <TooltipIconButton content="simulate" delayDuration={3000} side="bottom">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className={cn(
+              'ml-auto h-5 w-5 text-ide-text-muted hover:text-ide-text',
+              allRunning && 'text-ide-accent',
+              allActionDisabled && 'opacity-40 hover:text-ide-text-muted',
+            )}
+            disabled={allActionDisabled}
+            aria-label={allActionLabel}
+            data-testid="rtl-regression-action-simulate-all"
+            onClick={() => {
+              if (allRunning) {
+                stopAllRun();
+                return;
+              }
+
+              startAllRun();
+            }}
+          >
+            {allRunning ? <CircleStop className="h-3.5 w-3.5" aria-hidden="true" /> : <CirclePlay className="h-3.5 w-3.5" aria-hidden="true" />}
+          </Button>
+        </TooltipIconButton>
       </div>
       <div
         data-testid="rtl-regression-tree"
@@ -185,7 +235,7 @@ export function RtlRegressionPanel() {
             <div key={group.id} role="none">
               <div
                 data-testid={`rtl-regression-group-${group.id}`}
-                className="group flex h-7 min-w-0 items-center gap-1 pr-2 text-ide-text hover:bg-ide-hover"
+                className="group/rtl-regression-group flex h-7 min-w-0 items-center gap-1 pr-2 text-ide-text hover:bg-ide-hover"
                 role="treeitem"
                 aria-expanded={expanded}
               >
@@ -207,37 +257,42 @@ export function RtlRegressionPanel() {
                     ({group.tests.length})
                   </span>
                 </span>
-                <TooltipIconButton content="simulate" delayDuration={3000} side="bottom">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    className={cn(
-                      'ml-auto h-5 w-5 text-ide-text-muted opacity-0 transition-opacity hover:text-ide-text group-hover:opacity-100 group-focus-within:opacity-100',
-                      groupRunning && 'text-ide-accent opacity-100',
-                      groupActionDisabled && 'hover:text-ide-text-muted group-hover:opacity-40 group-focus-within:opacity-40',
-                    )}
-                    disabled={groupActionDisabled}
-                    aria-label={groupActionLabel}
-                    data-testid={`rtl-regression-group-action-simulate-${group.id}`}
-                    onClick={() => {
-                      if (groupRunning) {
-                        stopGroupRun(group.id);
-                        return;
-                      }
+                <div
+                  data-testid={`rtl-regression-group-action-shell-${group.id}`}
+                  className="ml-auto opacity-0 transition-opacity group-hover/rtl-regression-group:opacity-100"
+                >
+                  <TooltipIconButton content="simulate" delayDuration={3000} side="bottom">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className={cn(
+                        'h-5 w-5 text-ide-text-muted hover:text-ide-text',
+                        groupRunning && 'text-ide-accent',
+                        groupActionDisabled && 'hover:text-ide-text-muted',
+                      )}
+                      disabled={groupActionDisabled}
+                      aria-label={groupActionLabel}
+                      data-testid={`rtl-regression-group-action-simulate-${group.id}`}
+                      onClick={() => {
+                        if (groupRunning) {
+                          stopGroupRun(group.id);
+                          return;
+                        }
 
-                      startGroupRun(group.id);
-                    }}
-                  >
-                    {groupRunning ? <CircleStop className="h-3.5 w-3.5" aria-hidden="true" /> : <CirclePlay className="h-3.5 w-3.5" aria-hidden="true" />}
-                  </Button>
-                </TooltipIconButton>
+                        startGroupRun(group.id);
+                      }}
+                    >
+                      {groupRunning ? <CircleStop className="h-3.5 w-3.5" aria-hidden="true" /> : <CirclePlay className="h-3.5 w-3.5" aria-hidden="true" />}
+                    </Button>
+                  </TooltipIconButton>
+                </div>
               </div>
               {expanded && group.tests.map((test) => (
                 <TestRow
                   key={test.id}
                   activeMode={activeRun?.scope === 'test' && activeRun.testId === test.id ? activeRun.mode : null}
-                  forceRunning={groupRunning}
+                  forceRunning={allRunning || groupRunning}
                   runDisabled={activeRun !== null && !(activeRun.scope === 'test' && activeRun.testId === test.id)}
                   test={test}
                   onStart={startTestRun}

@@ -78,6 +78,35 @@ describe('useRtlRegressionStore', () => {
     expect(getStore().activeRun).toBeNull();
   });
 
+  it('starts and stops one all-group simulation run', () => {
+    getStore().startAllRun();
+
+    expect(getStore().activeRun).toEqual({
+      mode: 'simulation',
+      scope: 'all',
+    });
+
+    getStore().startGroupRun('ip');
+    getStore().startTestRun('cpu-reset-vector', 'debug');
+
+    expect(getStore().activeRun).toEqual({
+      mode: 'simulation',
+      scope: 'all',
+    });
+
+    getStore().stopGroupRun('ip');
+    getStore().stopTestRun('cpu-reset-vector');
+
+    expect(getStore().activeRun).toEqual({
+      mode: 'simulation',
+      scope: 'all',
+    });
+
+    getStore().stopAllRun();
+
+    expect(getStore().activeRun).toBeNull();
+  });
+
   it('stops the active run only when the requested test matches', () => {
     getStore().startTestRun('cpu-reset-vector', 'simulation');
     getStore().stopTestRun('ip-uart-loopback');

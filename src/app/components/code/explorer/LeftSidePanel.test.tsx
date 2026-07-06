@@ -300,6 +300,8 @@ describe('LeftSidePanel', () => {
     await testUser.click(screen.getByTestId('left-panel-secondary-tab-rtl-regression'));
 
     expect(screen.getByTestId('rtl-regression-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('rtl-regression-summary-count')).toHaveTextContent('13/32');
+    expect(screen.getByTestId('rtl-regression-action-simulate-all')).toHaveClass('h-5', 'w-5');
     expect(screen.getByTestId('rtl-regression-group-cpu')).toHaveTextContent('cpu');
     expect(screen.getByTestId('rtl-regression-group-count-cpu')).toHaveTextContent('(8)');
     expect(screen.getByTestId('rtl-regression-group-count-cpu')).toHaveClass('leading-4');
@@ -342,8 +344,10 @@ describe('LeftSidePanel', () => {
     expect(screen.getByRole('button', { name: 'Stop simulation reset_vector_boot' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeDisabled();
     expect(screen.getByTestId('rtl-regression-group-action-simulate-ip')).toBeDisabled();
-    expect(screen.getByTestId('rtl-regression-group-action-simulate-ip')).toHaveClass('opacity-0');
+    expect(screen.getByTestId('rtl-regression-group-action-shell-ip')).toHaveClass('opacity-0');
     expect(screen.getByTestId('rtl-regression-group-action-simulate-ip')).not.toHaveClass('opacity-40');
+    expect(screen.getByTestId('rtl-regression-group-action-shell-perf')).toHaveClass('opacity-0');
+    expect(screen.getByTestId('rtl-regression-group-action-simulate-perf')).not.toHaveClass('opacity-40');
 
     await testUser.click(screen.getByTestId('rtl-regression-action-simulate-cpu-reset-vector'));
 
@@ -363,6 +367,35 @@ describe('LeftSidePanel', () => {
 
     await testUser.click(screen.getByTestId('rtl-regression-group-action-simulate-ip'));
     expect(useRtlRegressionStore.getState().activeRun).toBeNull();
+  });
+
+  it('shows the RTL regression summary and controls all-suite simulation state', async () => {
+    renderLeftSidePanel({}, { layoutMode: 'compact' });
+
+    await testUser.click(screen.getByTestId('left-panel-split-toggle'));
+    await waitFor(() => expect(screen.getByTestId('panel-left-panel-secondary')).toHaveAttribute('aria-hidden', 'false'));
+    await testUser.click(screen.getByTestId('left-panel-secondary-tab-rtl-regression'));
+
+    expect(screen.getByTestId('rtl-regression-summary-count')).toHaveTextContent('13/32');
+    expect(screen.getByTestId('rtl-regression-action-simulate-all')).toHaveClass('h-5', 'w-5');
+
+    await testUser.click(screen.getByTestId('rtl-regression-action-simulate-all'));
+    expect(useRtlRegressionStore.getState().activeRun).toEqual({
+      mode: 'simulation',
+      scope: 'all',
+    });
+    expect(screen.getByRole('button', { name: 'Stop simulation RTL Regression' })).toBeInTheDocument();
+    expect(within(screen.getByTestId('rtl-regression-test-row-cpu-reset-vector')).getByTestId('rtl-regression-status-running')).toHaveAccessibleName('running');
+    expect(within(screen.getByTestId('rtl-regression-test-row-ip-uart-loopback')).getByTestId('rtl-regression-status-running')).toHaveAccessibleName('running');
+    expect(within(screen.getByTestId('rtl-regression-test-row-perf-coremark')).getByTestId('rtl-regression-status-running')).toHaveAccessibleName('running');
+    expect(screen.getByTestId('rtl-regression-group-action-simulate-cpu')).toBeDisabled();
+    expect(screen.getByTestId('rtl-regression-group-action-shell-cpu')).toHaveClass('opacity-0');
+    expect(screen.getByTestId('rtl-regression-group-action-simulate-ip')).toBeDisabled();
+    expect(screen.getByTestId('rtl-regression-group-action-shell-ip')).toHaveClass('opacity-0');
+
+    await testUser.click(screen.getByTestId('rtl-regression-action-simulate-all'));
+    expect(useRtlRegressionStore.getState().activeRun).toBeNull();
+    expect(screen.getByRole('button', { name: 'Run simulation RTL Regression' })).toBeInTheDocument();
   });
 
   it('persists selected real explorer nodes for project session restore', async () => {

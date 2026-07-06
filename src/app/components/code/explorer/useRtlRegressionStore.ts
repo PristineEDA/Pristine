@@ -15,7 +15,12 @@ export interface RtlRegressionGroupRun {
   scope: 'group';
 }
 
-export type RtlRegressionActiveRun = RtlRegressionTestRun | RtlRegressionGroupRun;
+export interface RtlRegressionAllRun {
+  mode: 'simulation';
+  scope: 'all';
+}
+
+export type RtlRegressionActiveRun = RtlRegressionAllRun | RtlRegressionGroupRun | RtlRegressionTestRun;
 
 interface RtlRegressionState {
   activeRun: RtlRegressionActiveRun | null;
@@ -24,8 +29,10 @@ interface RtlRegressionState {
 
 interface RtlRegressionActions {
   resetRtlRegressionStoreForTests: () => void;
+  startAllRun: () => void;
   startGroupRun: (groupId: RtlRegressionGroupId) => void;
   startTestRun: (testId: string, mode: RtlRegressionRunMode) => void;
+  stopAllRun: () => void;
   stopGroupRun: (groupId?: RtlRegressionGroupId) => void;
   stopTestRun: (testId?: string) => void;
   toggleGroup: (groupId: RtlRegressionGroupId) => void;
@@ -54,6 +61,14 @@ export const useRtlRegressionStore = create<RtlRegressionStore>((set) => ({
     set(createDefaultRtlRegressionState());
   },
 
+  startAllRun: () => {
+    set((state) => (
+      state.activeRun
+        ? state
+        : { activeRun: { mode: 'simulation', scope: 'all' } }
+    ));
+  },
+
   startTestRun: (testId, mode) => {
     set((state) => (
       state.activeRun
@@ -68,6 +83,16 @@ export const useRtlRegressionStore = create<RtlRegressionStore>((set) => ({
         ? state
         : { activeRun: { groupId, mode: 'simulation', scope: 'group' } }
     ));
+  },
+
+  stopAllRun: () => {
+    set((state) => {
+      if (!state.activeRun || state.activeRun.scope !== 'all') {
+        return state;
+      }
+
+      return { activeRun: null };
+    });
   },
 
   stopTestRun: (testId) => {
