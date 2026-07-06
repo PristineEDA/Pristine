@@ -4926,6 +4926,64 @@ test('code view hierarchy renders module instantiations from pristine-engine', a
   await app.close();
 });
 
+test('left panel RTL regression lower tab renders mock suites and run controls', async () => {
+  const { app, window } = await launchApp();
+
+  try {
+    await ensureExplorerVisible(window);
+
+    await window.getByTestId('left-panel-split-toggle').click();
+    await expect(window.getByTestId('left-panel-secondary-panel')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(window.getByTestId('left-panel-secondary-tab-hierarchy')).toBeVisible();
+    await expect(window.getByTestId('left-panel-secondary-tab-libraries')).toBeVisible();
+    await expect(window.getByTestId('left-panel-secondary-tab-rtl-regression')).toBeVisible();
+
+    await window.getByTestId('left-panel-secondary-tab-rtl-regression').click();
+    await expect(window.getByTestId('rtl-regression-panel')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-group-cpu')).toContainText('cpu');
+    await expect(window.getByTestId('rtl-regression-group-count-cpu')).toHaveText('(8)');
+    await expect(window.getByTestId('rtl-regression-group-ip')).toContainText('ip');
+    await expect(window.getByTestId('rtl-regression-group-count-ip')).toHaveText('(8)');
+    await expect(window.getByTestId('rtl-regression-group-perf')).toContainText('perf');
+    await expect(window.getByTestId('rtl-regression-group-count-perf')).toHaveText('(8)');
+
+    const cpuTestRow = window.getByTestId('rtl-regression-test-row-cpu-reset-vector');
+    await expect(cpuTestRow).toContainText('reset_vector_boot');
+    await expect(cpuTestRow.getByTestId('rtl-regression-status-passed')).toBeVisible();
+    await expect(cpuTestRow).not.toContainText('正确');
+
+    await window.getByTestId('rtl-regression-group-toggle-cpu').click();
+    await expect(cpuTestRow).toHaveCount(0);
+    await window.getByTestId('rtl-regression-group-toggle-cpu').click();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector')).toBeVisible();
+
+    await window.getByTestId('rtl-regression-test-row-cpu-reset-vector').hover();
+    await expect(window.getByRole('button', { name: 'Run simulation reset_vector_boot' })).toBeVisible();
+    await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeVisible();
+    await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').hover();
+    await expect(window.getByRole('tooltip', { name: 'simulate' })).toBeVisible();
+    await window.getByTestId('rtl-regression-action-debug-cpu-reset-vector').hover();
+    await expect(window.getByRole('tooltip', { name: 'debug' })).toBeVisible();
+    await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').click();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector')).not.toContainText('进行中');
+    await expect(window.getByRole('button', { name: 'Stop simulation reset_vector_boot' })).toBeVisible();
+    await expect(window.getByRole('button', { name: 'Stop debug reset_vector_boot' })).toBeVisible();
+
+    await window.getByTestId('left-panel-secondary-tab-libraries').click();
+    await expect(window.getByTestId('left-panel-libraries-placeholder')).toHaveText('Libraries is empty');
+    await window.getByTestId('left-panel-secondary-tab-rtl-regression').click();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
+
+    await window.getByTestId('rtl-regression-test-row-cpu-reset-vector').hover();
+    await window.getByTestId('rtl-regression-action-debug-cpu-reset-vector').click();
+    await expect(window.getByRole('button', { name: 'Run simulation reset_vector_boot' })).toBeVisible();
+    await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeVisible();
+  } finally {
+    await app.close().catch(() => undefined);
+  }
+});
+
 test('lsp panel captures initialization logs when hierarchy opens before any editor', async () => {
   test.slow();
   skipIfPristineEngineUnavailable();

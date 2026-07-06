@@ -424,7 +424,7 @@ function normalizeSidePanelSession(
     leftSecondaryTab: normalizeStringOption(
       value['leftSecondaryTab'],
       fallback.leftSecondaryTab,
-      ['hierarchy', 'libraries'],
+      ['hierarchy', 'libraries', 'rtl-regression'],
     ),
     leftSplitVisible: typeof value['leftSplitVisible'] === 'boolean'
       ? value['leftSplitVisible']
