@@ -793,7 +793,7 @@ function createWorkspaceCopyWithFiles(targetName: string, files: Record<string, 
   return targetPath;
 }
 
-function createE2EPdfBuffer() {
+function createE2EPdfBuffer(pageCount = 2) {
   const parts: string[] = ['%PDF-1.4\n'];
   const offsets: number[] = [];
 
@@ -802,30 +802,55 @@ function createE2EPdfBuffer() {
     parts.push(`${objectId} 0 obj\n${body}\nendobj\n`);
   };
 
-  const pageOneStream = 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1 https://example.com/pristine-pdf) Tj ET';
-  const pageTwoStream = 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 2) Tj ET';
+  const normalizedPageCount = Math.max(1, pageCount);
+  const pageObjects = Array.from({ length: normalizedPageCount }, (_, index) => ({
+    contentId: 4 + index * 2,
+    pageId: 3 + index * 2,
+  }));
+  const fontObjectId = 3 + normalizedPageCount * 2;
+  const outlinesObjectId = fontObjectId + 1;
+  const firstOutlineObjectId = outlinesObjectId + 1;
+  const linkObjectId = firstOutlineObjectId + normalizedPageCount;
+  const pageKids = pageObjects.map(({ pageId }) => `${pageId} 0 R`).join(' ');
 
-  addObject(1, '<< /Type /Catalog /Pages 2 0 R /Outlines 8 0 R >>');
-  addObject(2, '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>');
-  addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R /Annots [11 0 R] >>');
-  addObject(4, `<< /Length ${Buffer.byteLength(pageOneStream, 'ascii')} >>\nstream\n${pageOneStream}\nendstream`);
-  addObject(5, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>');
-  addObject(6, `<< /Length ${Buffer.byteLength(pageTwoStream, 'ascii')} >>\nstream\n${pageTwoStream}\nendstream`);
-  addObject(7, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-  addObject(8, '<< /Type /Outlines /First 9 0 R /Last 10 0 R /Count 2 >>');
-  addObject(9, '<< /Title (Page 1) /Parent 8 0 R /Next 10 0 R /Dest [3 0 R /Fit] >>');
-  addObject(10, '<< /Title (Page 2) /Parent 8 0 R /Prev 9 0 R /Dest [5 0 R /Fit] >>');
-  addObject(11, '<< /Type /Annot /Subtype /Link /Rect [72 1200 560 1280] /Border [0 0 0] /A << /S /URI /URI (https://example.com/pristine-pdf) >> >>');
+  addObject(1, `<< /Type /Catalog /Pages 2 0 R /Outlines ${outlinesObjectId} 0 R >>`);
+  addObject(2, `<< /Type /Pages /Kids [${pageKids}] /Count ${normalizedPageCount} >>`);
+
+  for (let index = 0; index < normalizedPageCount; index += 1) {
+    const pageNumber = index + 1;
+    const { contentId, pageId } = pageObjects[index];
+    const annotationClause = pageNumber === 1 ? ` /Annots [${linkObjectId} 0 R]` : '';
+    const pageStream = pageNumber === 1
+      ? 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1 https://example.com/pristine-pdf) Tj ET'
+      : `BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page ${pageNumber}) Tj ET`;
+
+    addObject(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentId} 0 R${annotationClause} >>`);
+    addObject(contentId, `<< /Length ${Buffer.byteLength(pageStream, 'ascii')} >>\nstream\n${pageStream}\nendstream`);
+  }
+
+  addObject(fontObjectId, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  addObject(outlinesObjectId, `<< /Type /Outlines /First ${firstOutlineObjectId} 0 R /Last ${firstOutlineObjectId + normalizedPageCount - 1} 0 R /Count ${normalizedPageCount} >>`);
+
+  for (let index = 0; index < normalizedPageCount; index += 1) {
+    const outlineObjectId = firstOutlineObjectId + index;
+    const pageNumber = index + 1;
+    const previousClause = pageNumber > 1 ? ` /Prev ${outlineObjectId - 1} 0 R` : '';
+    const nextClause = pageNumber < normalizedPageCount ? ` /Next ${outlineObjectId + 1} 0 R` : '';
+
+    addObject(outlineObjectId, `<< /Title (Page ${pageNumber}) /Parent ${outlinesObjectId} 0 R${previousClause}${nextClause} /Dest [${pageObjects[index].pageId} 0 R /Fit] >>`);
+  }
+
+  addObject(linkObjectId, '<< /Type /Annot /Subtype /Link /Rect [72 1200 560 1280] /Border [0 0 0] /A << /S /URI /URI (https://example.com/pristine-pdf) >> >>');
 
   const xrefOffset = Buffer.byteLength(parts.join(''), 'ascii');
   parts.push('xref\n');
-  parts.push('0 12\n');
+  parts.push(`0 ${linkObjectId + 1}\n`);
   parts.push('0000000000 65535 f \n');
-  for (let objectId = 1; objectId <= 11; objectId += 1) {
+  for (let objectId = 1; objectId <= linkObjectId; objectId += 1) {
     parts.push(`${String(offsets[objectId]).padStart(10, '0')} 00000 n \n`);
   }
   parts.push('trailer\n');
-  parts.push('<< /Size 12 /Root 1 0 R >>\n');
+  parts.push(`<< /Size ${linkObjectId + 1} /Root 1 0 R >>\n`);
   parts.push('startxref\n');
   parts.push(`${xrefOffset}\n`);
   parts.push('%%EOF\n');
@@ -4893,6 +4918,80 @@ test('file tree opens PDF files in the center editor tab', async () => {
   await expect(window.getByTestId('pdf-viewer-search-highlight').first()).toBeVisible();
   await window.getByTestId('pdf-viewer-search-next').click();
   await expect(window.getByTestId('pdf-viewer-search-count')).toContainText('2 / 2');
+
+  await app.close();
+});
+
+test('PDF thumbnail rail follows the main viewport current page', async () => {
+  const projectRoot = createWorkspaceCopyWithFiles('pdf-thumbnail-sync-project', {
+    'docs/long-spec.pdf': createE2EPdfBuffer(12),
+  });
+  const { app, window } = await launchApp({ projectRoot });
+
+  await ensureExplorerVisible(window);
+  await openNestedWorkspaceFile(window, [
+    toWorkspaceTreeTestId('docs'),
+    toWorkspaceTreeTestId('docs/long-spec.pdf'),
+  ]);
+
+  await expect(window.getByTestId('pdf-viewer-pane')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 12', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
+  const thumbnailRail = window.getByTestId('pdf-viewer-thumbnail-rail');
+  const initialThumbnailScrollTop = await thumbnailRail.evaluate((element) => Number((element as unknown as {
+    scrollTop?: number;
+  }).scrollTop ?? 0));
+
+  await viewport.evaluate((element) => {
+    const viewportElement = element as unknown as {
+      dispatchEvent: (event: Event) => boolean;
+      scrollHeight: number;
+      scrollTop: number;
+    };
+    viewportElement.scrollTop = viewportElement.scrollHeight;
+    viewportElement.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+
+  await expect.poll(async () => {
+    const pageIndicatorText = await window.getByTestId('pdf-viewer-page-indicator').textContent();
+    return Number(pageIndicatorText?.match(/^(\d+)/)?.[1] ?? 0);
+  }, {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(8);
+  const activePageNumber = await window.getByTestId('pdf-viewer-page-indicator').evaluate((element) => {
+    const textContent = (element as unknown as { textContent?: string | null }).textContent ?? '';
+    return Number(textContent.match(/^(\d+)/)?.[1] ?? 0);
+  });
+  const activeThumbnail = window.getByTestId(`pdf-viewer-thumbnail-${activePageNumber}`);
+  await expect(activeThumbnail).toHaveAttribute('aria-current', 'page');
+  await expect.poll(async () => thumbnailRail.evaluate((element) => Number((element as unknown as {
+    scrollTop?: number;
+  }).scrollTop ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(initialThumbnailScrollTop);
+  const activeThumbnailIsVisible = await activeThumbnail.evaluate((element) => {
+    const sourceElement = element as unknown as {
+      closest: (selector: string) => unknown;
+    };
+    const rail = sourceElement.closest('[data-testid="pdf-viewer-thumbnail-rail"]');
+    const getRect = (node: unknown) => (node as {
+      getBoundingClientRect: () => {
+        bottom: number;
+        top: number;
+      };
+    }).getBoundingClientRect();
+    if (!rail) {
+      return false;
+    }
+
+    const thumbnailRect = getRect(element);
+    const railRect = getRect(rail);
+    return thumbnailRect.top >= railRect.top && thumbnailRect.bottom <= railRect.bottom;
+  });
+  expect(activeThumbnailIsVisible).toBe(true);
 
   await app.close();
 });

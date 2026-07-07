@@ -143,12 +143,17 @@ describe('PdfViewerPane', () => {
 
     const bookmark = await screen.findByTestId('pdf-viewer-bookmark-bookmark-0');
     expect(screen.getByTestId('pdf-viewer-bookmark-tree')).toBeInTheDocument();
+    expect(screen.getByText('Bookmarks')).toHaveClass('font-normal');
+    expect(screen.getByText('Bookmarks')).not.toHaveClass('font-semibold');
+    expect(bookmark).toHaveClass('font-normal');
 
     fireEvent.click(bookmark);
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 2'));
 
     const link = await screen.findByTestId('pdf-viewer-link-1-0');
     expect(link).toHaveClass('cursor-pointer');
+    expect(link).toHaveClass('focus-visible:ring-ide-accent');
+    expect(link).not.toHaveClass('hover:bg-sky-400/10');
     fireEvent.click(link);
     expect(window.electronAPI!.shell.openExternal).toHaveBeenCalledWith('https://example.com/annotated');
   });
@@ -288,11 +293,19 @@ describe('PdfViewerPane', () => {
     const viewport = await screen.findByTestId('pdf-viewer-scroll-viewport');
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
 
+    const secondThumbnail = screen.getByTestId('pdf-viewer-thumbnail-2');
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(secondThumbnail, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
     viewport.scrollTop = 900;
     fireEvent.scroll(viewport);
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3'));
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').scrollTop).toBe(900);
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' }));
 
     const shiftWheel = createEvent.wheel(viewport, {
       cancelable: true,
@@ -340,6 +353,11 @@ describe('PdfViewerPane', () => {
 
     fireEvent.click(screen.getByTestId('pdf-viewer-search-toggle'));
     const searchInput = screen.getByTestId('pdf-viewer-search-input');
+    expect(searchInput).toHaveClass('text-ide-text');
+    expect(searchInput).toHaveClass('caret-ide-text');
+    expect(searchInput).toHaveClass('selection:bg-ide-accent/45');
+    expect(searchInput).toHaveClass('selection:text-white');
+    expect(searchInput).toHaveClass('placeholder:text-ide-text-muted');
     fireEvent.change(searchInput, { target: { value: 'timing' } });
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-search-count')).toHaveTextContent('1 / 2'));

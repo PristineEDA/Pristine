@@ -686,7 +686,7 @@ function PdfPageLinkLayer({
           aria-label={`Open link ${link.url}`}
           title={link.url}
           onClick={() => onOpenLink(link.url)}
-          className="pointer-events-auto absolute cursor-pointer rounded-sm bg-transparent outline-none hover:bg-sky-400/10 focus-visible:ring-1 focus-visible:ring-ide-accent"
+          className="pointer-events-auto absolute cursor-pointer rounded-sm bg-transparent outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
           style={{
             left: link.left,
             top: link.top,
@@ -818,7 +818,7 @@ function PdfBookmarkTree({
             data-testid={`pdf-viewer-bookmark-${bookmark.id}`}
             title={bookmark.title}
             onClick={() => onOpenBookmark(bookmark)}
-            className="min-w-0 flex-1 truncate text-left"
+            className="min-w-0 flex-1 truncate text-left font-normal"
           >
             {bookmark.title}
           </button>
@@ -838,7 +838,7 @@ function PdfBookmarkTree({
       className="w-56 shrink-0 overflow-y-auto border-r border-ide-border bg-ide-tab-bg/80 px-2 py-2"
       aria-label="PDF bookmarks"
     >
-      <div className="mb-2 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-ide-text-muted">
+      <div className="mb-2 flex items-center gap-2 px-1 text-[11px] font-normal uppercase tracking-wide text-ide-text-muted">
         <BookOpen size={13} />
         Bookmarks
       </div>
@@ -862,6 +862,7 @@ export function PdfViewerPane({
   dragInteractionShieldTestId,
 }: PdfViewerPaneProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const thumbnailRailRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const restoredScrollForFileRef = useRef<string | null>(null);
   const handDragRef = useRef<{
@@ -1267,6 +1268,21 @@ export function PdfViewerPane({
     }
   }, [isSearchOpen]);
 
+  useEffect(() => {
+    if (!isThumbnailRailVisible || pageCount === 0) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const activeThumbnail = thumbnailRailRef.current?.querySelector<HTMLElement>(
+        `[data-testid="pdf-viewer-thumbnail-${pageNumber}"]`,
+      );
+      activeThumbnail?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isThumbnailRailVisible, pageCount, pageNumber]);
+
   const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     if (event.ctrlKey) {
       event.preventDefault();
@@ -1658,7 +1674,7 @@ export function PdfViewerPane({
               }
             }}
             placeholder="Search PDF"
-            className="h-6 min-w-0 flex-1 rounded border border-ide-border bg-ide-tab-bg px-2 text-[12px] text-ide-text outline-none placeholder:text-ide-text-muted focus:border-ide-accent"
+            className="h-6 min-w-0 flex-1 rounded border border-ide-border bg-ide-tab-bg px-2 text-[12px] text-ide-text caret-ide-text outline-none selection:bg-ide-accent/45 selection:text-white placeholder:text-ide-text-muted focus:border-ide-accent"
           />
           <span data-testid="pdf-viewer-search-count" className="min-w-16 text-right text-ide-text-muted">
             {normalizedSearchQuery
@@ -1823,6 +1839,7 @@ export function PdfViewerPane({
           </div>
           {pdfDocument && pageCount > 0 && isThumbnailRailVisible && (
             <div
+              ref={thumbnailRailRef}
               data-testid="pdf-viewer-thumbnail-rail"
               className="w-[108px] shrink-0 overflow-y-auto border-l border-ide-border bg-ide-tab-bg/80 px-2 py-2"
             >
