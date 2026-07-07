@@ -9,12 +9,16 @@ export const PDF_VIEWER_ZOOM_STEP = 0.25;
 interface PdfViewerSession {
   pageNumber: number;
   zoom: number;
+  scrollTop: number;
+  scrollLeft: number;
 }
 
 interface PdfViewerStoreState {
   sessions: Record<string, PdfViewerSession>;
   getSession: (fileId: string) => PdfViewerSession;
   setPageNumber: (fileId: string, pageNumber: number, pageCount?: number) => void;
+  setPageNumberFromViewport: (fileId: string, pageNumber: number, pageCount?: number) => void;
+  setScrollPosition: (fileId: string, position: Partial<Pick<PdfViewerSession, 'scrollTop' | 'scrollLeft'>>) => void;
   setZoom: (fileId: string, zoom: number) => void;
   resetPdfSession: (fileId: string) => void;
   resetPdfViewerStoreForTests: () => void;
@@ -40,6 +44,8 @@ function normalizeZoom(zoom: number): number {
 const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   pageNumber: PDF_VIEWER_DEFAULT_PAGE_NUMBER,
   zoom: PDF_VIEWER_DEFAULT_ZOOM,
+  scrollTop: 0,
+  scrollLeft: 0,
 };
 
 export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
@@ -58,6 +64,59 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           [fileId]: {
             ...current,
             pageNumber: normalizePageNumber(pageNumber, pageCount),
+          },
+        },
+      };
+    });
+  },
+  setPageNumberFromViewport: (fileId, pageNumber, pageCount) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const nextPageNumber = normalizePageNumber(pageNumber, pageCount);
+      if (current.pageNumber === nextPageNumber) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            pageNumber: nextPageNumber,
+          },
+        },
+      };
+    });
+  },
+  setScrollPosition: (fileId, position) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const scrollTop = position.scrollTop === undefined
+        ? current.scrollTop
+        : Math.max(0, Number.isFinite(position.scrollTop) ? position.scrollTop : 0);
+      const scrollLeft = position.scrollLeft === undefined
+        ? current.scrollLeft
+        : Math.max(0, Number.isFinite(position.scrollLeft) ? position.scrollLeft : 0);
+
+      if (current.scrollTop === scrollTop && current.scrollLeft === scrollLeft) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            scrollTop,
+            scrollLeft,
           },
         },
       };

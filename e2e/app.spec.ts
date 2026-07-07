@@ -802,14 +802,14 @@ function createE2EPdfBuffer() {
     parts.push(`${objectId} 0 obj\n${body}\nendobj\n`);
   };
 
-  const pageOneStream = 'BT /F1 18 Tf 36 120 Td (Pristine PDF E2E page 1) Tj ET';
-  const pageTwoStream = 'BT /F1 18 Tf 36 120 Td (Pristine PDF E2E page 2) Tj ET';
+  const pageOneStream = 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1) Tj ET';
+  const pageTwoStream = 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 2) Tj ET';
 
   addObject(1, '<< /Type /Catalog /Pages 2 0 R >>');
   addObject(2, '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>');
-  addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 240 180] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>');
+  addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>');
   addObject(4, `<< /Length ${Buffer.byteLength(pageOneStream, 'ascii')} >>\nstream\n${pageOneStream}\nendstream`);
-  addObject(5, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 240 180] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>');
+  addObject(5, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>');
   addObject(6, `<< /Length ${Buffer.byteLength(pageTwoStream, 'ascii')} >>\nstream\n${pageTwoStream}\nendstream`);
   addObject(7, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
 
@@ -4726,19 +4726,57 @@ test('file tree opens PDF files in the center editor tab', async () => {
   });
   await expect(window.locator('.monaco-editor')).toHaveCount(0);
 
-  const canvas = window.getByTestId('pdf-viewer-canvas');
-  await expect.poll(async () => canvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+  const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
+  const firstPageCanvas = window.getByTestId('pdf-viewer-page-canvas-1');
+  const secondPageCanvas = window.getByTestId('pdf-viewer-page-canvas-2');
+  await expect(viewport).toBeVisible();
+  await expect(firstPageCanvas).toBeVisible();
+  await expect(secondPageCanvas).toBeAttached();
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
     timeout: UI_READY_TIMEOUT_MS,
   }).toBeGreaterThan(0);
-  const initialCanvasWidth = await canvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
+  const initialCanvasWidth = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
 
+  await viewport.click();
+  await window.mouse.wheel(0, 1800);
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  await window.keyboard.down('Control');
+  await window.mouse.wheel(0, -400);
+  await window.keyboard.up('Control');
+  await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('125%');
+  await expect.poll(async () => secondPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(initialCanvasWidth);
+
+  await window.getByTestId('pdf-viewer-prev-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2');
   await window.getByTestId('pdf-viewer-next-page').click();
   await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2');
 
   await window.getByTestId('pdf-viewer-zoom-in').click();
-  await expect.poll(async () => canvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
-    timeout: UI_READY_TIMEOUT_MS,
-  }).toBeGreaterThan(initialCanvasWidth);
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('200%');
+  const horizontalBefore = await viewport.evaluate((element) => Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0));
+  const horizontalDelta = horizontalBefore > 0 ? -700 : 700;
+  await viewport.dispatchEvent('wheel', {
+    bubbles: true,
+    cancelable: true,
+    deltaY: horizontalDelta,
+    shiftKey: true,
+  });
+  if (horizontalDelta > 0) {
+    await expect.poll(async () => viewport.evaluate((element) => Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0)), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBeGreaterThan(horizontalBefore);
+  } else {
+    await expect.poll(async () => viewport.evaluate((element) => Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0)), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBeLessThan(horizontalBefore);
+  }
 
   await app.close();
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PdfViewerPane } from './PdfViewerPane';
 import { usePdfViewerStore } from '../../../pdf/usePdfViewerStore';
@@ -17,9 +17,10 @@ vi.mock('pdfjs-dist/legacy/build/pdf.worker.mjs?url', () => ({
 }));
 
 function createMockPdfDocument(pageCount = 2) {
+  const cancelRenderTask = vi.fn();
   const render = vi.fn(() => ({
     promise: Promise.resolve(),
-    cancel: vi.fn(),
+    cancel: cancelRenderTask,
   }));
   const getPage = vi.fn(async () => ({
     getViewport: ({ scale }: { scale: number }) => ({
@@ -35,6 +36,7 @@ function createMockPdfDocument(pageCount = 2) {
     getPage,
     numPages: pageCount,
     render,
+    cancelRenderTask,
   };
 }
 
@@ -45,7 +47,7 @@ describe('PdfViewerPane', () => {
     vi.mocked(window.electronAPI!.fs.readFileBinary).mockResolvedValue(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
   });
 
-  it('loads PDF bytes and renders the first page', async () => {
+  it('loads PDF bytes and renders continuous PDF pages', async () => {
     const pdfDocument = createMockPdfDocument(2);
     mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
 
@@ -60,8 +62,14 @@ describe('PdfViewerPane', () => {
       standardFontDataUrl: './generated/pdfjs/standard_fonts/',
     }));
     expect(pdfDocument.getPage).toHaveBeenCalledWith(1);
-    expect(screen.getByTestId('pdf-viewer-canvas')).toHaveAttribute('width', '600');
-    expect(screen.getByTestId('pdf-viewer-canvas')).toHaveAttribute('height', '800');
+    expect(pdfDocument.getPage).toHaveBeenCalledWith(2);
+    expect(screen.getByTestId('pdf-viewer-scroll-viewport')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-canvas-1')).toHaveAttribute('width', '600');
+    expect(screen.getByTestId('pdf-viewer-page-canvas-1')).toHaveAttribute('height', '800');
+    expect(screen.getByTestId('pdf-viewer-page-canvas-2')).toHaveAttribute('width', '600');
+    expect(screen.getByTestId('pdf-viewer-page-canvas-2')).toHaveAttribute('height', '800');
   });
 
   it('supports page navigation and zoom controls', async () => {
@@ -75,16 +83,53 @@ describe('PdfViewerPane', () => {
     fireEvent.click(screen.getByTestId('pdf-viewer-next-page'));
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3'));
-    expect(pdfDocument.getPage).toHaveBeenLastCalledWith(2);
+    expect(pdfDocument.getPage).toHaveBeenCalledWith(2);
 
     fireEvent.click(screen.getByTestId('pdf-viewer-zoom-in'));
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-zoom-indicator')).toHaveTextContent('125%'));
-    await waitFor(() => expect(screen.getByTestId('pdf-viewer-canvas')).toHaveAttribute('width', '750'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-canvas-2')).toHaveAttribute('width', '750'));
+    expect(pdfDocument.cancelRenderTask).toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('pdf-viewer-reset-zoom'));
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-zoom-indicator')).toHaveTextContent('100%'));
+  });
+
+  it('tracks viewport scroll and supports wheel shortcuts', async () => {
+    const pdfDocument = createMockPdfDocument(3);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    const viewport = await screen.findByTestId('pdf-viewer-scroll-viewport');
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+
+    viewport.scrollTop = 900;
+    fireEvent.scroll(viewport);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3'));
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').scrollTop).toBe(900);
+
+    const shiftWheel = createEvent.wheel(viewport, {
+      cancelable: true,
+      deltaY: 72,
+      shiftKey: true,
+    });
+    fireEvent(viewport, shiftWheel);
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').scrollLeft).toBe(72);
+
+    const ctrlWheel = createEvent.wheel(viewport, {
+      cancelable: true,
+      clientX: 20,
+      clientY: 20,
+      ctrlKey: true,
+      deltaY: -120,
+    });
+    fireEvent(viewport, ctrlWheel);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-zoom-indicator')).toHaveTextContent('125%'));
   });
 
   it('shows an inline error and can retry a failed load', async () => {
