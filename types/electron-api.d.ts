@@ -154,6 +154,7 @@ export interface ElectronAPI {
       pid: number | undefined;
     }>;
     kill: (id: string) => Promise<boolean>;
+    openExternal: (url: string) => Promise<boolean>;
     onStdout: (callback: (data: { id: string; data: string }) => void) => () => void;
     onStderr: (callback: (data: { id: string; data: string }) => void) => () => void;
     onExit: (callback: (data: { id: string; code: number | null; error?: string }) => void) => () => void;

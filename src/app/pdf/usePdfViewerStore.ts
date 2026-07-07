@@ -3,11 +3,33 @@ import { create } from 'zustand';
 export const PDF_VIEWER_DEFAULT_PAGE_NUMBER = 1;
 export const PDF_VIEWER_DEFAULT_ZOOM = 1;
 export const PDF_VIEWER_MIN_ZOOM = 0.5;
-export const PDF_VIEWER_MAX_ZOOM = 2;
+export const PDF_VIEWER_MAX_ZOOM = 6;
 export const PDF_VIEWER_ZOOM_STEP = 0.25;
 
 export type PdfViewerFitMode = 'custom' | 'width' | 'page';
 export type PdfViewerToolMode = 'select' | 'hand';
+
+export interface PdfHighlightRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface PdfHighlightAnnotation {
+  id: string;
+  pageNumber: number;
+  rects: PdfHighlightRect[];
+  color: 'yellow';
+  quote: string;
+  createdAt: number;
+}
+
+export interface CreatePdfHighlightAnnotationInput {
+  pageNumber: number;
+  rects: PdfHighlightRect[];
+  quote?: string;
+}
 
 export interface PdfViewerSession {
   pageNumber: number;
@@ -19,6 +41,10 @@ export interface PdfViewerSession {
   searchQuery: string;
   isSearchOpen: boolean;
   activeSearchMatchIndex: number;
+  isBookmarkTreeVisible: boolean;
+  isThumbnailRailVisible: boolean;
+  expandedBookmarkIds: string[];
+  highlightAnnotations: PdfHighlightAnnotation[];
 }
 
 interface PdfViewerStoreState {
@@ -33,6 +59,12 @@ interface PdfViewerStoreState {
   setSearchOpen: (fileId: string, isOpen: boolean) => void;
   setSearchQuery: (fileId: string, query: string) => void;
   setActiveSearchMatchIndex: (fileId: string, index: number, matchCount?: number) => void;
+  setBookmarkTreeVisible: (fileId: string, visible: boolean) => void;
+  setThumbnailRailVisible: (fileId: string, visible: boolean) => void;
+  toggleBookmarkExpanded: (fileId: string, bookmarkId: string) => void;
+  addHighlightAnnotation: (fileId: string, annotation: CreatePdfHighlightAnnotationInput) => string | null;
+  removeHighlightAnnotation: (fileId: string, annotationId: string) => void;
+  clearHighlightAnnotations: (fileId: string) => void;
   resetPdfSession: (fileId: string) => void;
   resetPdfViewerStoreForTests: () => void;
 }
@@ -79,6 +111,32 @@ function normalizeSearchMatchIndex(index: number, matchCount?: number): number {
   return Math.min(normalizedIndex, Math.max(0, Math.floor(matchCount) - 1));
 }
 
+function normalizeHighlightRect(rect: PdfHighlightRect): PdfHighlightRect | null {
+  const left = Number.isFinite(rect.left) ? Math.max(0, rect.left) : 0;
+  const top = Number.isFinite(rect.top) ? Math.max(0, rect.top) : 0;
+  const width = Number.isFinite(rect.width) ? Math.max(0, rect.width) : 0;
+  const height = Number.isFinite(rect.height) ? Math.max(0, rect.height) : 0;
+
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return {
+    left: Math.round(left * 100) / 100,
+    top: Math.round(top * 100) / 100,
+    width: Math.round(width * 100) / 100,
+    height: Math.round(height * 100) / 100,
+  };
+}
+
+function createHighlightId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `pdf-highlight-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   pageNumber: PDF_VIEWER_DEFAULT_PAGE_NUMBER,
   zoom: PDF_VIEWER_DEFAULT_ZOOM,
@@ -89,6 +147,10 @@ const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   searchQuery: '',
   isSearchOpen: false,
   activeSearchMatchIndex: 0,
+  isBookmarkTreeVisible: true,
+  isThumbnailRailVisible: true,
+  expandedBookmarkIds: [],
+  highlightAnnotations: [],
 };
 
 export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
@@ -294,6 +356,152 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           [fileId]: {
             ...current,
             activeSearchMatchIndex: nextIndex,
+          },
+        },
+      };
+    });
+  },
+  setBookmarkTreeVisible: (fileId, visible) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      if (current.isBookmarkTreeVisible === visible) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            isBookmarkTreeVisible: visible,
+          },
+        },
+      };
+    });
+  },
+  setThumbnailRailVisible: (fileId, visible) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      if (current.isThumbnailRailVisible === visible) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            isThumbnailRailVisible: visible,
+          },
+        },
+      };
+    });
+  },
+  toggleBookmarkExpanded: (fileId, bookmarkId) => {
+    if (!fileId || !bookmarkId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const isExpanded = current.expandedBookmarkIds.includes(bookmarkId);
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            expandedBookmarkIds: isExpanded
+              ? current.expandedBookmarkIds.filter((id) => id !== bookmarkId)
+              : [...current.expandedBookmarkIds, bookmarkId],
+          },
+        },
+      };
+    });
+  },
+  addHighlightAnnotation: (fileId, annotation) => {
+    if (!fileId) {
+      return null;
+    }
+
+    const rects = annotation.rects.map(normalizeHighlightRect).filter((rect): rect is PdfHighlightRect => rect !== null);
+    if (rects.length === 0) {
+      return null;
+    }
+
+    const id = createHighlightId();
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            highlightAnnotations: [
+              ...current.highlightAnnotations,
+              {
+                id,
+                pageNumber: normalizePageNumber(annotation.pageNumber),
+                rects,
+                color: 'yellow',
+                quote: (annotation.quote ?? '').slice(0, 512),
+                createdAt: Date.now(),
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    return id;
+  },
+  removeHighlightAnnotation: (fileId, annotationId) => {
+    if (!fileId || !annotationId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const nextAnnotations = current.highlightAnnotations.filter((annotation) => annotation.id !== annotationId);
+      if (nextAnnotations.length === current.highlightAnnotations.length) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            highlightAnnotations: nextAnnotations,
+          },
+        },
+      };
+    });
+  },
+  clearHighlightAnnotations: (fileId) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      if (current.highlightAnnotations.length === 0) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            highlightAnnotations: [],
           },
         },
       };

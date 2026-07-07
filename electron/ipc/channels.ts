@@ -60,6 +60,7 @@ export const AsyncChannels = {
   GIT_GET_FILE_DIFF: 'async:git:get-file-diff',
   SHELL_EXEC: 'async:shell:exec',
   SHELL_KILL: 'async:shell:kill',
+  SHELL_OPEN_EXTERNAL: 'async:shell:open-external',
   TERMINAL_CREATE: 'async:terminal:create',
   TERMINAL_WRITE: 'async:terminal:write',
   TERMINAL_RESIZE: 'async:terminal:resize',

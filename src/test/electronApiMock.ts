@@ -148,6 +148,7 @@ export function createElectronApiMock(): ElectronAPI {
     shell: {
       exec: vi.fn(),
       kill: vi.fn(),
+      openExternal: vi.fn().mockResolvedValue(true),
       onStdout: vi.fn(() => vi.fn()),
       onStderr: vi.fn(() => vi.fn()),
       onExit: vi.fn(() => vi.fn()),

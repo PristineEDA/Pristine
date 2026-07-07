@@ -17,6 +17,10 @@ const defaultSession = {
   searchQuery: '',
   isSearchOpen: false,
   activeSearchMatchIndex: 0,
+  isBookmarkTreeVisible: true,
+  isThumbnailRailVisible: true,
+  expandedBookmarkIds: [],
+  highlightAnnotations: [],
 } as const;
 
 describe('usePdfViewerStore', () => {
@@ -114,6 +118,55 @@ describe('usePdfViewerStore', () => {
       activeSearchMatchIndex: 0,
     });
     expect(usePdfViewerStore.getState().getSession('docs/other.pdf')).toEqual(defaultSession);
+  });
+
+  it('stores bookmark, thumbnail, and expanded bookmark state per PDF file', () => {
+    usePdfViewerStore.getState().setBookmarkTreeVisible('docs/spec.pdf', false);
+    usePdfViewerStore.getState().setThumbnailRailVisible('docs/spec.pdf', false);
+    usePdfViewerStore.getState().toggleBookmarkExpanded('docs/spec.pdf', 'bookmark-0');
+    usePdfViewerStore.getState().toggleBookmarkExpanded('docs/spec.pdf', 'bookmark-1');
+    usePdfViewerStore.getState().toggleBookmarkExpanded('docs/spec.pdf', 'bookmark-0');
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toEqual({
+      ...defaultSession,
+      isBookmarkTreeVisible: false,
+      isThumbnailRailVisible: false,
+      expandedBookmarkIds: ['bookmark-1'],
+    });
+    expect(usePdfViewerStore.getState().getSession('docs/other.pdf')).toEqual(defaultSession);
+  });
+
+  it('stores highlight annotations per PDF file', () => {
+    const id = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 2,
+      quote: 'Selected PDF text',
+      rects: [
+        { left: 10.123, top: 20.456, width: 120.5, height: 14.25 },
+        { left: 0, top: 0, width: 0, height: 12 },
+      ],
+    });
+
+    expect(id).toEqual(expect.any(String));
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual([
+      {
+        id,
+        pageNumber: 2,
+        color: 'yellow',
+        quote: 'Selected PDF text',
+        createdAt: expect.any(Number),
+        rects: [{ left: 10.12, top: 20.46, width: 120.5, height: 14.25 }],
+      },
+    ]);
+
+    usePdfViewerStore.getState().removeHighlightAnnotation('docs/spec.pdf', id!);
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual([]);
+
+    usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 1, top: 2, width: 3, height: 4 }],
+    });
+    usePdfViewerStore.getState().clearHighlightAnnotations('docs/spec.pdf');
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual([]);
   });
 
   it('can reset a single file session and the full store', () => {

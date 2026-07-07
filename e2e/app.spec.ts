@@ -802,26 +802,30 @@ function createE2EPdfBuffer() {
     parts.push(`${objectId} 0 obj\n${body}\nendobj\n`);
   };
 
-  const pageOneStream = 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1) Tj ET';
+  const pageOneStream = 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1 https://example.com/pristine-pdf) Tj ET';
   const pageTwoStream = 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 2) Tj ET';
 
-  addObject(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  addObject(1, '<< /Type /Catalog /Pages 2 0 R /Outlines 8 0 R >>');
   addObject(2, '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>');
-  addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>');
+  addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R /Annots [11 0 R] >>');
   addObject(4, `<< /Length ${Buffer.byteLength(pageOneStream, 'ascii')} >>\nstream\n${pageOneStream}\nendstream`);
   addObject(5, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>');
   addObject(6, `<< /Length ${Buffer.byteLength(pageTwoStream, 'ascii')} >>\nstream\n${pageTwoStream}\nendstream`);
   addObject(7, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  addObject(8, '<< /Type /Outlines /First 9 0 R /Last 10 0 R /Count 2 >>');
+  addObject(9, '<< /Title (Page 1) /Parent 8 0 R /Next 10 0 R /Dest [3 0 R /Fit] >>');
+  addObject(10, '<< /Title (Page 2) /Parent 8 0 R /Prev 9 0 R /Dest [5 0 R /Fit] >>');
+  addObject(11, '<< /Type /Annot /Subtype /Link /Rect [72 1200 560 1280] /Border [0 0 0] /A << /S /URI /URI (https://example.com/pristine-pdf) >> >>');
 
   const xrefOffset = Buffer.byteLength(parts.join(''), 'ascii');
   parts.push('xref\n');
-  parts.push('0 8\n');
+  parts.push('0 12\n');
   parts.push('0000000000 65535 f \n');
-  for (let objectId = 1; objectId <= 7; objectId += 1) {
+  for (let objectId = 1; objectId <= 11; objectId += 1) {
     parts.push(`${String(offsets[objectId]).padStart(10, '0')} 00000 n \n`);
   }
   parts.push('trailer\n');
-  parts.push('<< /Size 8 /Root 1 0 R >>\n');
+  parts.push('<< /Size 12 /Root 1 0 R >>\n');
   parts.push('startxref\n');
   parts.push(`${xrefOffset}\n`);
   parts.push('%%EOF\n');
@@ -4730,15 +4734,36 @@ test('file tree opens PDF files in the center editor tab', async () => {
   const firstPageCanvas = window.getByTestId('pdf-viewer-page-canvas-1');
   const secondPageCanvas = window.getByTestId('pdf-viewer-page-canvas-2');
   await expect(viewport).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-bookmark-bookmark-0')).toContainText('Page 1');
+  await expect(window.getByTestId('pdf-viewer-bookmark-bookmark-1')).toContainText('Page 2');
   await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
   await expect(window.getByTestId('pdf-viewer-thumbnail-1')).toHaveAttribute('aria-current', 'page');
   await expect(firstPageCanvas).toBeVisible();
   await expect(secondPageCanvas).toBeAttached();
   await expect(window.getByTestId('pdf-viewer-text-layer-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-link-1-0')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
     timeout: UI_READY_TIMEOUT_MS,
   }).toBeGreaterThan(0);
   const initialCanvasWidth = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
+
+  await window.getByTestId('pdf-viewer-bookmark-bookmark-1').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.getByTestId('pdf-viewer-bookmark-bookmark-0').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.getByTestId('pdf-viewer-toggle-bookmarks').click();
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toHaveCount(0);
+  await window.getByTestId('pdf-viewer-toggle-bookmarks').click();
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toBeVisible();
+  await window.getByTestId('pdf-viewer-toggle-thumbnails').click();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toHaveCount(0);
+  await window.getByTestId('pdf-viewer-toggle-thumbnails').click();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
 
   await viewport.click();
   await window.mouse.wheel(0, 1800);
@@ -4783,6 +4808,10 @@ test('file tree opens PDF files in the center editor tab', async () => {
   await window.getByTestId('pdf-viewer-zoom-in').click();
   await window.getByTestId('pdf-viewer-zoom-in').click();
   await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('200%');
+  for (let index = 0; index < 16; index += 1) {
+    await window.getByTestId('pdf-viewer-zoom-in').click();
+  }
+  await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('600%');
   await expect.poll(async () => secondPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
     timeout: UI_READY_TIMEOUT_MS,
   }).toBeGreaterThan(initialCanvasWidth);
@@ -4827,6 +4856,33 @@ test('file tree opens PDF files in the center editor tab', async () => {
 
   await window.getByTestId('pdf-viewer-select-tool').click();
   await expect(window.getByTestId('pdf-viewer-select-tool')).toHaveAttribute('aria-pressed', 'true');
+  await window.getByTestId('pdf-viewer-thumbnail-1').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2');
+  await window.evaluate(() => {
+    const browserGlobal = globalThis as unknown as {
+      document: {
+        createRange: () => {
+          selectNodeContents: (node: unknown) => void;
+        };
+        querySelector: (selector: string) => unknown;
+      };
+      getSelection: () => {
+        addRange: (range: unknown) => void;
+        removeAllRanges: () => void;
+      } | null;
+    };
+    const firstTextSpan = browserGlobal.document.querySelector('[data-testid="pdf-viewer-text-layer-1"] span');
+    if (!firstTextSpan) {
+      throw new Error('Expected a PDF text span for highlight selection.');
+    }
+    const range = browserGlobal.document.createRange();
+    range.selectNodeContents(firstTextSpan);
+    const selection = browserGlobal.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await window.getByTestId('pdf-viewer-highlight-selection').click();
+  await expect(window.getByTestId('pdf-viewer-highlight').first()).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   await viewport.click();
   await window.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
   await expect(window.getByTestId('pdf-viewer-search-input')).toBeVisible();

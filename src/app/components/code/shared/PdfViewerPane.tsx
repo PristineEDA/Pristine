@@ -12,11 +12,16 @@ import {
 } from 'react';
 import {
   AlertTriangle,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   Hand,
+  Highlighter,
   Maximize2,
+  MoveHorizontal,
   MousePointer2,
+  PanelLeft,
+  PanelRight,
   RotateCcw,
   Search,
   X,
@@ -30,6 +35,8 @@ import {
   PDF_VIEWER_MAX_ZOOM,
   PDF_VIEWER_MIN_ZOOM,
   PDF_VIEWER_ZOOM_STEP,
+  type PdfHighlightAnnotation,
+  type PdfHighlightRect,
   type PdfViewerFitMode,
   type PdfViewerToolMode,
   usePdfViewerStore,
@@ -77,6 +84,23 @@ interface PdfSearchMatch {
 
 type PdfTransform = [number, number, number, number, number, number];
 
+interface PdfLinkOverlay {
+  id: string;
+  url: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface PdfBookmark {
+  id: string;
+  title: string;
+  dest: unknown;
+  url: string | null;
+  children: PdfBookmark[];
+}
+
 interface PdfPageCanvasProps {
   pageNumber: number;
   pdfDocument: PDFDocumentProxy;
@@ -97,6 +121,23 @@ interface PdfPageTextLayerProps {
   searchMatches: PdfSearchMatch[];
   activeSearchMatchIndex: number;
   onTextItemsChange: (pageNumber: number, items: PdfTextItem[]) => void;
+}
+
+interface PdfPageLinkLayerProps {
+  pageNumber: number;
+  pdfDocument: PDFDocumentProxy;
+  zoom: number;
+  shouldRender: boolean;
+  pageSize: PdfPageSize;
+  textItems: PdfTextItem[];
+  onOpenLink: (url: string) => void;
+}
+
+interface PdfPageHighlightLayerProps {
+  pageNumber: number;
+  pageSize: PdfPageSize;
+  zoom: number;
+  annotations: PdfHighlightAnnotation[];
 }
 
 interface PdfThumbnailCanvasProps {
@@ -216,6 +257,88 @@ function multiplyTransform(first: PdfTransform, second: PdfTransform): PdfTransf
 
 function getNormalizedSearchQuery(query: string): string {
   return query.trim().toLowerCase();
+}
+
+function getTextUrl(text: string): string | null {
+  const match = text.match(/\bhttps?:\/\/[^\s<>"')]+/i);
+  return match?.[0] ?? null;
+}
+
+function getAnnotationUrl(annotation: Record<string, unknown>): string | null {
+  const url = typeof annotation['url'] === 'string' ? annotation['url'] : annotation['unsafeUrl'];
+  return typeof url === 'string' && url.length > 0 ? url : null;
+}
+
+function normalizeLinkUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:'
+      ? parsed.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getViewportRect(rect: unknown, viewport: unknown): PdfHighlightRect | null {
+  if (!Array.isArray(rect) || rect.length < 4) {
+    return null;
+  }
+
+  const convertToViewportRectangle = (viewport as { convertToViewportRectangle?: (rect: number[]) => number[] })
+    .convertToViewportRectangle;
+  if (typeof convertToViewportRectangle !== 'function') {
+    return null;
+  }
+
+  const viewportRect = convertToViewportRectangle.call(viewport, rect.slice(0, 4));
+  if (!Array.isArray(viewportRect) || viewportRect.length < 4) {
+    return null;
+  }
+
+  const x1 = viewportRect[0];
+  const y1 = viewportRect[1];
+  const x2 = viewportRect[2];
+  const y2 = viewportRect[3];
+  if (
+    typeof x1 !== 'number'
+    || typeof y1 !== 'number'
+    || typeof x2 !== 'number'
+    || typeof y2 !== 'number'
+  ) {
+    return null;
+  }
+
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const width = Math.abs(x2 - x1);
+  const height = Math.abs(y2 - y1);
+
+  if (!Number.isFinite(left) || !Number.isFinite(top) || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return { left, top, width, height };
+}
+
+function normalizeBookmarks(items: unknown, parentId = 'bookmark'): PdfBookmark[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item, index) => {
+    const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    const id = `${parentId}-${index}`;
+    return {
+      id,
+      title: typeof record['title'] === 'string' && record['title'].trim()
+        ? record['title'].trim()
+        : 'Untitled',
+      dest: record['dest'],
+      url: typeof record['url'] === 'string' ? record['url'] : null,
+      children: normalizeBookmarks(record['items'], id),
+    };
+  });
 }
 
 function PdfPageCanvas({
@@ -390,7 +513,7 @@ function PdfPageTextLayer({
     <div
       data-testid={`pdf-viewer-text-layer-${pageNumber}`}
       className={[
-        'absolute inset-0 overflow-hidden',
+        'absolute inset-0 z-[2] overflow-hidden',
         toolMode === 'hand' ? 'pointer-events-none select-none' : 'select-text',
       ].join(' ')}
       style={{ height: pageSize.height, width: pageSize.width }}
@@ -421,6 +544,157 @@ function PdfPageTextLayer({
           </span>
         );
       })}
+    </div>
+  );
+}
+
+function PdfPageHighlightLayer({
+  pageNumber,
+  pageSize,
+  zoom,
+  annotations,
+}: PdfPageHighlightLayerProps) {
+  const pageAnnotations = annotations.filter((annotation) => annotation.pageNumber === pageNumber);
+  if (pageAnnotations.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid={`pdf-viewer-highlight-layer-${pageNumber}`}
+      className="pointer-events-none absolute inset-0 z-[1] overflow-hidden"
+      style={{ height: pageSize.height, width: pageSize.width }}
+    >
+      {pageAnnotations.flatMap((annotation) => annotation.rects.map((rect, rectIndex) => (
+        <div
+          key={`${annotation.id}-${rectIndex}`}
+          data-testid="pdf-viewer-highlight"
+          className="absolute rounded-[1px] bg-yellow-300/35 mix-blend-multiply outline outline-1 outline-yellow-200/30"
+          title={annotation.quote}
+          style={{
+            left: rect.left * zoom,
+            top: rect.top * zoom,
+            width: rect.width * zoom,
+            height: rect.height * zoom,
+          }}
+        />
+      )))}
+    </div>
+  );
+}
+
+function PdfPageLinkLayer({
+  pageNumber,
+  pdfDocument,
+  zoom,
+  shouldRender,
+  pageSize,
+  textItems,
+  onOpenLink,
+}: PdfPageLinkLayerProps) {
+  const [annotationLinks, setAnnotationLinks] = useState<PdfLinkOverlay[]>([]);
+
+  useEffect(() => {
+    if (!shouldRender) {
+      setAnnotationLinks([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    void pdfDocument.getPage(pageNumber)
+      .then(async (page) => {
+        const getAnnotations = (page as {
+          getAnnotations?: (options?: { intent?: string }) => Promise<Array<Record<string, unknown>>>;
+        }).getAnnotations;
+        if (typeof getAnnotations !== 'function') {
+          return [];
+        }
+
+        const viewport = page.getViewport({ scale: zoom });
+        const annotations = await getAnnotations.call(page, { intent: 'display' });
+        return annotations
+          .map((annotation, index) => {
+            const url = normalizeLinkUrl(getAnnotationUrl(annotation) ?? '');
+            const rect = getViewportRect(annotation['rect'], viewport);
+            if (!url || !rect) {
+              return null;
+            }
+
+            return {
+              id: `annotation-${pageNumber}-${index}`,
+              url,
+              ...rect,
+            };
+          })
+          .filter((link): link is PdfLinkOverlay => link !== null);
+      })
+      .then((links) => {
+        if (!cancelled) {
+          setAnnotationLinks(links);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAnnotationLinks([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pageNumber, pdfDocument, shouldRender, zoom]);
+
+  if (!shouldRender) {
+    return null;
+  }
+
+  const textLinks = textItems
+    .map((item) => {
+      const url = normalizeLinkUrl(getTextUrl(item.text) ?? '');
+      if (!url) {
+        return null;
+      }
+
+      return {
+        id: `text-${pageNumber}-${item.itemIndex}`,
+        url,
+        left: item.left,
+        top: item.top,
+        width: item.width,
+        height: item.height,
+      };
+    })
+    .filter((link): link is PdfLinkOverlay => link !== null);
+  const links = [...annotationLinks, ...textLinks];
+
+  if (links.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid={`pdf-viewer-link-layer-${pageNumber}`}
+      className="pointer-events-none absolute inset-0 z-[3] overflow-hidden"
+      style={{ height: pageSize.height, width: pageSize.width }}
+    >
+      {links.map((link, index) => (
+        <button
+          key={`${link.id}-${index}`}
+          type="button"
+          data-testid={`pdf-viewer-link-${pageNumber}-${index}`}
+          aria-label={`Open link ${link.url}`}
+          title={link.url}
+          onClick={() => onOpenLink(link.url)}
+          className="pointer-events-auto absolute cursor-pointer rounded-sm bg-transparent outline-none hover:bg-sky-400/10 focus-visible:ring-1 focus-visible:ring-ide-accent"
+          style={{
+            left: link.left,
+            top: link.top,
+            width: link.width,
+            height: link.height,
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -507,6 +781,80 @@ function PdfThumbnailCanvas({
   );
 }
 
+interface PdfBookmarkTreeProps {
+  bookmarks: PdfBookmark[];
+  expandedBookmarkIds: string[];
+  onToggleBookmark: (bookmarkId: string) => void;
+  onOpenBookmark: (bookmark: PdfBookmark) => void;
+}
+
+function PdfBookmarkTree({
+  bookmarks,
+  expandedBookmarkIds,
+  onToggleBookmark,
+  onOpenBookmark,
+}: PdfBookmarkTreeProps) {
+  const renderBookmark = (bookmark: PdfBookmark, depth: number) => {
+    const isExpanded = expandedBookmarkIds.includes(bookmark.id);
+    const hasChildren = bookmark.children.length > 0;
+
+    return (
+      <li key={bookmark.id}>
+        <div
+          className="flex min-w-0 items-center gap-1 rounded px-1 py-1 text-[12px] text-ide-text-muted hover:bg-ide-hover hover:text-ide-text"
+          style={{ paddingLeft: 4 + depth * 12 }}
+        >
+          <button
+            type="button"
+            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} bookmark ${bookmark.title}`}
+            disabled={!hasChildren}
+            onClick={() => onToggleBookmark(bookmark.id)}
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-ide-text-muted hover:bg-ide-hover hover:text-ide-text disabled:opacity-0"
+          >
+            {isExpanded ? <ChevronRight size={12} className="rotate-90" /> : <ChevronRight size={12} />}
+          </button>
+          <button
+            type="button"
+            data-testid={`pdf-viewer-bookmark-${bookmark.id}`}
+            title={bookmark.title}
+            onClick={() => onOpenBookmark(bookmark)}
+            className="min-w-0 flex-1 truncate text-left"
+          >
+            {bookmark.title}
+          </button>
+        </div>
+        {hasChildren && isExpanded && (
+          <ul>
+            {bookmark.children.map((child) => renderBookmark(child, depth + 1))}
+          </ul>
+        )}
+      </li>
+    );
+  };
+
+  return (
+    <aside
+      data-testid="pdf-viewer-bookmark-tree"
+      className="w-56 shrink-0 overflow-y-auto border-r border-ide-border bg-ide-tab-bg/80 px-2 py-2"
+      aria-label="PDF bookmarks"
+    >
+      <div className="mb-2 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-ide-text-muted">
+        <BookOpen size={13} />
+        Bookmarks
+      </div>
+      {bookmarks.length === 0 ? (
+        <div data-testid="pdf-viewer-bookmark-empty" className="px-1 py-6 text-center text-[12px] text-ide-text-muted">
+          No bookmarks
+        </div>
+      ) : (
+        <ul className="space-y-0.5">
+          {bookmarks.map((bookmark) => renderBookmark(bookmark, 0))}
+        </ul>
+      )}
+    </aside>
+  );
+}
+
 export function PdfViewerPane({
   fileId,
   fileName,
@@ -527,6 +875,7 @@ export function PdfViewerPane({
   const [pageCount, setPageCount] = useState(0);
   const [pageSizes, setPageSizes] = useState<Record<number, PdfPageSize>>({});
   const [pageTextItems, setPageTextItems] = useState<Record<number, PdfTextItem[]>>({});
+  const [bookmarks, setBookmarks] = useState<PdfBookmark[]>([]);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [isHandDragging, setIsHandDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -536,7 +885,11 @@ export function PdfViewerPane({
   const {
     activeSearchMatchIndex,
     fitMode,
+    expandedBookmarkIds,
+    highlightAnnotations,
+    isBookmarkTreeVisible,
     isSearchOpen,
+    isThumbnailRailVisible,
     pageNumber,
     searchQuery,
     toolMode,
@@ -544,6 +897,10 @@ export function PdfViewerPane({
   } = usePdfViewerStore((state) => state.getSession(fileId));
   const setActiveSearchMatchIndex = usePdfViewerStore((state) => state.setActiveSearchMatchIndex);
   const setFitMode = usePdfViewerStore((state) => state.setFitMode);
+  const setBookmarkTreeVisible = usePdfViewerStore((state) => state.setBookmarkTreeVisible);
+  const setThumbnailRailVisible = usePdfViewerStore((state) => state.setThumbnailRailVisible);
+  const toggleBookmarkExpanded = usePdfViewerStore((state) => state.toggleBookmarkExpanded);
+  const addHighlightAnnotation = usePdfViewerStore((state) => state.addHighlightAnnotation);
   const setPageNumber = usePdfViewerStore((state) => state.setPageNumber);
   const setPageNumberFromViewport = usePdfViewerStore((state) => state.setPageNumberFromViewport);
   const setScrollPosition = usePdfViewerStore((state) => state.setScrollPosition);
@@ -593,6 +950,7 @@ export function PdfViewerPane({
     restoredScrollForFileRef.current = null;
     setPageSizes({});
     setPageTextItems({});
+    setBookmarks([]);
   }, [fileId, reloadToken]);
 
   useEffect(() => {
@@ -631,6 +989,19 @@ export function PdfViewerPane({
         setPdfDocument(document);
         setPageCount(document.numPages);
         setPageNumber(fileId, usePdfViewerStore.getState().getSession(fileId).pageNumber, document.numPages);
+        if (typeof document.getOutline === 'function') {
+          void document.getOutline()
+            .then((outline) => {
+              if (!cancelled) {
+                setBookmarks(normalizeBookmarks(outline));
+              }
+            })
+            .catch(() => {
+              if (!cancelled) {
+                setBookmarks([]);
+              }
+            });
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -754,6 +1125,53 @@ export function PdfViewerPane({
     });
     setPageNumber(fileId, normalizedPageNumber, pageCount);
   }, [fileId, pageCount, pageSizes, setPageNumber, setScrollPosition, zoom]);
+
+  const resolveBookmarkPageNumber = useCallback(async (bookmark: PdfBookmark): Promise<number | null> => {
+    if (!pdfDocument) {
+      return null;
+    }
+
+    let destination = bookmark.dest;
+    if (typeof destination === 'string' && typeof pdfDocument.getDestination === 'function') {
+      destination = await pdfDocument.getDestination(destination);
+    }
+
+    if (!Array.isArray(destination) || destination.length === 0) {
+      return null;
+    }
+
+    const pageRef = destination[0];
+    if (typeof pageRef === 'number') {
+      return Math.min(Math.max(Math.floor(pageRef) + 1, 1), Math.max(pageCount, 1));
+    }
+
+    if (pageRef && typeof pageRef === 'object' && typeof pdfDocument.getPageIndex === 'function') {
+      const pageIndex = await pdfDocument.getPageIndex(pageRef);
+      return Math.min(Math.max(pageIndex + 1, 1), Math.max(pageCount, 1));
+    }
+
+    return null;
+  }, [pageCount, pdfDocument]);
+
+  const handleOpenExternalLink = useCallback((url: string) => {
+    void window.electronAPI?.shell?.openExternal(url).catch(() => undefined);
+  }, []);
+
+  const handleOpenBookmark = useCallback((bookmark: PdfBookmark) => {
+    const url = bookmark.url ? normalizeLinkUrl(bookmark.url) : null;
+    if (url) {
+      handleOpenExternalLink(url);
+      return;
+    }
+
+    void resolveBookmarkPageNumber(bookmark)
+      .then((nextPageNumber) => {
+        if (nextPageNumber !== null) {
+          scrollToPage(nextPageNumber);
+        }
+      })
+      .catch(() => undefined);
+  }, [handleOpenExternalLink, resolveBookmarkPageNumber, scrollToPage]);
 
   const updateZoom = useCallback((
     nextZoom: number,
@@ -960,6 +1378,57 @@ export function PdfViewerPane({
     }
     setActiveSearchMatchIndex(fileId, (activeSearchMatchIndex + 1) % searchMatches.length, searchMatches.length);
   };
+  const handleAddHighlight = () => {
+    const viewport = viewportRef.current;
+    const selection = window.getSelection();
+    if (!viewport || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return;
+    }
+
+    const quote = selection.toString().trim();
+    const range = selection.getRangeAt(0);
+    const clientRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+    if (clientRects.length === 0) {
+      return;
+    }
+
+    const pageElements = Array.from(viewport.querySelectorAll<HTMLElement>('[data-pdf-page-content="true"]'));
+    for (const pageElement of pageElements) {
+      const pageNumberValue = Number(pageElement.dataset['pdfPageNumber']);
+      if (!Number.isFinite(pageNumberValue)) {
+        continue;
+      }
+
+      const pageRect = pageElement.getBoundingClientRect();
+      const rects: PdfHighlightRect[] = [];
+      for (const rect of clientRects) {
+        const left = Math.max(rect.left, pageRect.left);
+        const right = Math.min(rect.right, pageRect.right);
+        const top = Math.max(rect.top, pageRect.top);
+        const bottom = Math.min(rect.bottom, pageRect.bottom);
+        if (right <= left || bottom <= top) {
+          continue;
+        }
+
+        rects.push({
+          left: (left - pageRect.left) / zoom,
+          top: (top - pageRect.top) / zoom,
+          width: (right - left) / zoom,
+          height: (bottom - top) / zoom,
+        });
+      }
+
+      if (rects.length > 0) {
+        addHighlightAnnotation(fileId, {
+          pageNumber: pageNumberValue,
+          rects,
+          quote,
+        });
+      }
+    }
+
+    selection.removeAllRanges();
+  };
 
   return (
     <div data-testid="pdf-viewer-pane" className="relative flex min-h-0 flex-1 flex-col bg-ide-editor-bg text-ide-text">
@@ -971,6 +1440,39 @@ export function PdfViewerPane({
           {fileName}
         </span>
         <div className="flex items-center gap-1">
+          <TooltipIconButton content="Toggle Bookmarks">
+            <button
+              type="button"
+              aria-label="Toggle Bookmarks"
+              aria-pressed={isBookmarkTreeVisible}
+              data-testid="pdf-viewer-toggle-bookmarks"
+              disabled={isLoading || !pdfDocument}
+              onClick={() => setBookmarkTreeVisible(fileId, !isBookmarkTreeVisible)}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                isBookmarkTreeVisible ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <PanelLeft size={14} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Toggle Thumbnails">
+            <button
+              type="button"
+              aria-label="Toggle Thumbnails"
+              aria-pressed={isThumbnailRailVisible}
+              data-testid="pdf-viewer-toggle-thumbnails"
+              disabled={isLoading || !pdfDocument}
+              onClick={() => setThumbnailRailVisible(fileId, !isThumbnailRailVisible)}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                isThumbnailRailVisible ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <PanelRight size={14} />
+            </button>
+          </TooltipIconButton>
+          <div className="mx-1 h-4 w-px bg-ide-border" />
           <TooltipIconButton content="Previous Page">
             <button
               type="button"
@@ -1031,6 +1533,18 @@ export function PdfViewerPane({
               <Hand size={14} />
             </button>
           </TooltipIconButton>
+          <TooltipIconButton content="Highlight Selection">
+            <button
+              type="button"
+              aria-label="Highlight Selection"
+              data-testid="pdf-viewer-highlight-selection"
+              disabled={isLoading || !pdfDocument || toolMode === 'hand'}
+              onClick={handleAddHighlight}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <Highlighter size={14} />
+            </button>
+          </TooltipIconButton>
           <div className="mx-1 h-4 w-px bg-ide-border" />
           <TooltipIconButton content="Fit Width">
             <button
@@ -1041,11 +1555,11 @@ export function PdfViewerPane({
               disabled={isLoading || !pdfDocument}
               onClick={handleWidthFit}
               className={[
-                'rounded px-2 py-1 text-[11px] transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
                 fitMode === 'width' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
               ].join(' ')}
             >
-              Width
+              <MoveHorizontal size={14} />
             </button>
           </TooltipIconButton>
           <TooltipIconButton content="Fit Page">
@@ -1206,6 +1720,14 @@ export function PdfViewerPane({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
+          {pdfDocument && isBookmarkTreeVisible && (
+            <PdfBookmarkTree
+              bookmarks={bookmarks}
+              expandedBookmarkIds={expandedBookmarkIds}
+              onToggleBookmark={(bookmarkId) => toggleBookmarkExpanded(fileId, bookmarkId)}
+              onOpenBookmark={handleOpenBookmark}
+            />
+          )}
           <div
             ref={viewportRef}
             data-testid="pdf-viewer-scroll-viewport"
@@ -1251,7 +1773,12 @@ export function PdfViewerPane({
                       className="flex justify-center"
                       style={{ marginBottom: PDF_VIEWER_PAGE_GAP_PX }}
                     >
-                      <div className="relative" style={{ height: pageSize.height, width: pageSize.width }}>
+                      <div
+                        className="relative"
+                        data-pdf-page-content="true"
+                        data-pdf-page-number={currentPageNumber}
+                        style={{ height: pageSize.height, width: pageSize.width }}
+                      >
                         <PdfPageCanvas
                           pageNumber={currentPageNumber}
                           pdfDocument={pdfDocument}
@@ -1260,6 +1787,12 @@ export function PdfViewerPane({
                           pageSize={pageSize}
                           onPageSizeChange={handlePageSizeChange}
                           onRenderError={setRenderError}
+                        />
+                        <PdfPageHighlightLayer
+                          pageNumber={currentPageNumber}
+                          pageSize={pageSize}
+                          zoom={zoom}
+                          annotations={highlightAnnotations}
                         />
                         <PdfPageTextLayer
                           pageNumber={currentPageNumber}
@@ -1272,6 +1805,15 @@ export function PdfViewerPane({
                           activeSearchMatchIndex={activeSearchMatchIndex}
                           onTextItemsChange={handleTextItemsChange}
                         />
+                        <PdfPageLinkLayer
+                          pageNumber={currentPageNumber}
+                          pdfDocument={pdfDocument}
+                          zoom={zoom}
+                          shouldRender={shouldRender}
+                          pageSize={pageSize}
+                          textItems={pageTextItems[currentPageNumber] ?? []}
+                          onOpenLink={handleOpenExternalLink}
+                        />
                       </div>
                     </div>
                   );
@@ -1279,7 +1821,7 @@ export function PdfViewerPane({
               </div>
             </div>
           </div>
-          {pdfDocument && pageCount > 0 && (
+          {pdfDocument && pageCount > 0 && isThumbnailRailVisible && (
             <div
               data-testid="pdf-viewer-thumbnail-rail"
               className="w-[108px] shrink-0 overflow-y-auto border-l border-ide-border bg-ide-tab-bg/80 px-2 py-2"

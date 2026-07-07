@@ -245,6 +245,8 @@ describe('preload bridge', () => {
     expect(mockInvoke).toHaveBeenCalledWith('async:git:get-status');
     expect(mockInvoke).toHaveBeenCalledWith('async:shell:exec', 'make', ['lint'], { cwd: 'rtl' });
     expect(mockInvoke).toHaveBeenCalledWith('async:shell:kill', 'shell-1');
+    api.shell.openExternal('https://example.com/spec.pdf');
+    expect(mockInvoke).toHaveBeenCalledWith('async:shell:open-external', 'https://example.com/spec.pdf');
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:create', { cwd: 'rtl', cols: 120, rows: 40, profile: 'wsl-pristine-eda' });
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:write', 'terminal-1', 'help');
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:resize', 'terminal-1', 160, 50);

@@ -1,5 +1,5 @@
 import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PdfViewerPane } from './PdfViewerPane';
 import { usePdfViewerStore } from '../../../pdf/usePdfViewerStore';
 
@@ -16,7 +16,16 @@ vi.mock('pdfjs-dist/legacy/build/pdf.worker.mjs?url', () => ({
   default: 'mock-pdf-worker-url',
 }));
 
-function createMockPdfDocument(pageCount = 2, pageTexts: Record<number, string[]> = {}) {
+interface MockPdfDocumentOptions {
+  annotations?: Record<number, Array<Record<string, unknown>>>;
+  outline?: Array<Record<string, unknown>>;
+}
+
+function createMockPdfDocument(
+  pageCount = 2,
+  pageTexts: Record<number, string[]> = {},
+  options: MockPdfDocumentOptions = {},
+) {
   const cancelRenderTask = vi.fn();
   const render = vi.fn(() => ({
     promise: Promise.resolve(),
@@ -35,14 +44,27 @@ function createMockPdfDocument(pageCount = 2, pageTexts: Record<number, string[]
       width: 600 * scale,
       height: 800 * scale,
       transform: [scale, 0, 0, -scale, 0, 800 * scale],
+      convertToViewportRectangle: (rect: number[]) => {
+        const [x1 = 0, y1 = 0, x2 = 0, y2 = 0] = rect;
+        return [
+          x1 * scale,
+          (800 - y1) * scale,
+          x2 * scale,
+          (800 - y2) * scale,
+        ];
+      },
     }),
+    getAnnotations: vi.fn(async () => options.annotations?.[pageNumber] ?? []),
     render,
   }));
 
   return {
     cleanup: vi.fn(),
     destroy: vi.fn(),
+    getDestination: vi.fn(async (name: string) => (name === 'chapter-2' ? [{ num: 2, gen: 0 }] : null)),
+    getOutline: vi.fn(async () => options.outline ?? []),
     getPage,
+    getPageIndex: vi.fn(async () => 1),
     numPages: pageCount,
     render,
     cancelRenderTask,
@@ -65,6 +87,10 @@ describe('PdfViewerPane', () => {
     vi.clearAllMocks();
     usePdfViewerStore.getState().resetPdfViewerStoreForTests();
     vi.mocked(window.electronAPI!.fs.readFileBinary).mockResolvedValue(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('loads PDF bytes and renders continuous pages, thumbnails, and text layers', async () => {
@@ -95,6 +121,109 @@ describe('PdfViewerPane', () => {
     expect(screen.getByTestId('pdf-viewer-page-canvas-1')).toHaveAttribute('height', '800');
     expect(await screen.findByTestId('pdf-viewer-text-layer-1')).toBeInTheDocument();
     expect(await screen.findByTestId('pdf-viewer-text-layer-2')).toBeInTheDocument();
+  });
+
+  it('renders bookmarks and link overlays, and opens links through Electron shell', async () => {
+    const pdfDocument = createMockPdfDocument(2, {
+      1: ['Read more at https://example.com/spec'],
+      2: ['Chapter 2'],
+    }, {
+      annotations: {
+        1: [{ rect: [24, 720, 160, 744], url: 'https://example.com/annotated' }],
+      },
+      outline: [
+        { title: 'Chapter 2', dest: 'chapter-2', items: [] },
+      ],
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 2'));
+
+    const bookmark = await screen.findByTestId('pdf-viewer-bookmark-bookmark-0');
+    expect(screen.getByTestId('pdf-viewer-bookmark-tree')).toBeInTheDocument();
+
+    fireEvent.click(bookmark);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 2'));
+
+    const link = await screen.findByTestId('pdf-viewer-link-1-0');
+    expect(link).toHaveClass('cursor-pointer');
+    fireEvent.click(link);
+    expect(window.electronAPI!.shell.openExternal).toHaveBeenCalledWith('https://example.com/annotated');
+  });
+
+  it('toggles bookmark and thumbnail rails and uses an icon-only fit width control', async () => {
+    const pdfDocument = createMockPdfDocument(2);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 2'));
+
+    expect(screen.getByTestId('pdf-viewer-bookmark-tree')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-thumbnail-rail')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-fit-width')).not.toHaveTextContent('Width');
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-toggle-bookmarks'));
+    expect(screen.queryByTestId('pdf-viewer-bookmark-tree')).not.toBeInTheDocument();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isBookmarkTreeVisible).toBe(false);
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-toggle-thumbnails'));
+    expect(screen.queryByTestId('pdf-viewer-thumbnail-rail')).not.toBeInTheDocument();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isThumbnailRailVisible).toBe(false);
+  });
+
+  it('creates local highlight overlays from the current text selection', async () => {
+    const pdfDocument = createMockPdfDocument(1, {
+      1: ['Selectable annotation text'],
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue({
+      bottom: 820,
+      height: 800,
+      left: 10,
+      right: 610,
+      top: 20,
+      width: 600,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    });
+    const removeAllRanges = vi.fn();
+    const selection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      toString: () => 'Selectable annotation text',
+      getRangeAt: () => ({
+        getClientRects: () => [{
+          bottom: 66,
+          height: 16,
+          left: 50,
+          right: 210,
+          top: 50,
+          width: 160,
+          x: 50,
+          y: 50,
+          toJSON: () => ({}),
+        }],
+      }),
+      removeAllRanges,
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue(selection as unknown as Selection);
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-highlight-selection'));
+
+    expect(await screen.findByTestId('pdf-viewer-highlight')).toBeInTheDocument();
+    expect(removeAllRanges).toHaveBeenCalled();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toHaveLength(1);
   });
 
   it('supports page navigation, thumbnail navigation, and zoom controls', async () => {

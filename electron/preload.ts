@@ -229,6 +229,8 @@ const electronAPI = {
       }>,
     kill: (id: string) =>
       ipcRenderer.invoke(AsyncChannels.SHELL_KILL, id) as Promise<boolean>,
+    openExternal: (url: string) =>
+      ipcRenderer.invoke(AsyncChannels.SHELL_OPEN_EXTERNAL, url) as Promise<boolean>,
     onStdout: (callback: (data: { id: string; data: string }) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: { id: string; data: string }) =>
         callback(payload);
