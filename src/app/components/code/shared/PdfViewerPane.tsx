@@ -1,5 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type UIEvent, type WheelEvent } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type UIEvent,
+  type WheelEvent,
+} from 'react';
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  Hand,
+  Maximize2,
+  MousePointer2,
+  RotateCcw,
+  Search,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 import {
@@ -7,6 +30,8 @@ import {
   PDF_VIEWER_MAX_ZOOM,
   PDF_VIEWER_MIN_ZOOM,
   PDF_VIEWER_ZOOM_STEP,
+  type PdfViewerFitMode,
+  type PdfViewerToolMode,
   usePdfViewerStore,
 } from '../../../pdf/usePdfViewerStore';
 import { isAbsoluteFilePath } from '../../../workspace/workspaceFiles';
@@ -18,6 +43,10 @@ const PDFJS_ASSET_BASE_URL = './generated/pdfjs/';
 const PDF_VIEWER_DEFAULT_PAGE_SIZE = { width: 600, height: 800 };
 const PDF_VIEWER_PAGE_GAP_PX = 24;
 const PDF_VIEWER_RENDER_OVERSCAN = 2;
+const PDF_VIEWER_VIEWPORT_PADDING_X = 48;
+const PDF_VIEWER_VIEWPORT_PADDING_Y = 48;
+const PDF_VIEWER_THUMBNAIL_WIDTH_PX = 78;
+const PDF_VIEWER_THUMBNAIL_OVERSCAN = 4;
 
 interface PdfViewerPaneProps {
   fileId: string;
@@ -31,6 +60,23 @@ interface PdfPageSize {
   height: number;
 }
 
+interface PdfTextItem {
+  itemIndex: number;
+  text: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface PdfSearchMatch {
+  pageNumber: number;
+  itemIndex: number;
+  globalIndex: number;
+}
+
+type PdfTransform = [number, number, number, number, number, number];
+
 interface PdfPageCanvasProps {
   pageNumber: number;
   pdfDocument: PDFDocumentProxy;
@@ -39,6 +85,26 @@ interface PdfPageCanvasProps {
   pageSize: PdfPageSize;
   onPageSizeChange: (pageNumber: number, size: PdfPageSize) => void;
   onRenderError: (message: string | null) => void;
+}
+
+interface PdfPageTextLayerProps {
+  pageNumber: number;
+  pdfDocument: PDFDocumentProxy;
+  zoom: number;
+  shouldRender: boolean;
+  pageSize: PdfPageSize;
+  toolMode: PdfViewerToolMode;
+  searchMatches: PdfSearchMatch[];
+  activeSearchMatchIndex: number;
+  onTextItemsChange: (pageNumber: number, items: PdfTextItem[]) => void;
+}
+
+interface PdfThumbnailCanvasProps {
+  pageNumber: number;
+  pdfDocument: PDFDocumentProxy;
+  isActive: boolean;
+  shouldRender: boolean;
+  onClick: () => void;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -125,6 +191,33 @@ function setViewportScroll(viewport: HTMLElement, scrollLeft: number, scrollTop:
   viewport.scrollTop = Math.max(0, scrollTop);
 }
 
+function normalizeTransform(value: unknown, fallback: PdfTransform): PdfTransform {
+  if (!Array.isArray(value) || value.length < 6) {
+    return fallback;
+  }
+
+  const nextTransform = value.slice(0, 6).map((entry) => (
+    typeof entry === 'number' && Number.isFinite(entry) ? entry : 0
+  )) as PdfTransform;
+
+  return nextTransform;
+}
+
+function multiplyTransform(first: PdfTransform, second: PdfTransform): PdfTransform {
+  return [
+    first[0] * second[0] + first[2] * second[1],
+    first[1] * second[0] + first[3] * second[1],
+    first[0] * second[2] + first[2] * second[3],
+    first[1] * second[2] + first[3] * second[3],
+    first[0] * second[4] + first[2] * second[5] + first[4],
+    first[1] * second[4] + first[3] * second[5] + first[5],
+  ];
+}
+
+function getNormalizedSearchQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
 function PdfPageCanvas({
   pageNumber,
   pdfDocument,
@@ -186,32 +279,231 @@ function PdfPageCanvas({
   }, [onPageSizeChange, onRenderError, pageNumber, pdfDocument, shouldRender, zoom]);
 
   const pageStyle: CSSProperties = {
-    minHeight: pageSize.height,
+    height: pageSize.height,
     width: pageSize.width,
   };
 
+  if (!shouldRender) {
+    return (
+      <div
+        data-testid={`pdf-viewer-page-placeholder-${pageNumber}`}
+        className="rounded-sm border border-ide-border bg-ide-tab-bg/70"
+        style={pageStyle}
+      />
+    );
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      data-testid={`pdf-viewer-page-canvas-${pageNumber}`}
+      className="block rounded-sm bg-white shadow-[0_10px_35px_rgba(0,0,0,0.35)]"
+      style={pageStyle}
+    />
+  );
+}
+
+function PdfPageTextLayer({
+  pageNumber,
+  pdfDocument,
+  zoom,
+  shouldRender,
+  pageSize,
+  toolMode,
+  searchMatches,
+  activeSearchMatchIndex,
+  onTextItemsChange,
+}: PdfPageTextLayerProps) {
+  const [textItems, setTextItems] = useState<PdfTextItem[]>([]);
+  const matchByItemIndex = useMemo(() => {
+    const nextMatches = new Map<number, PdfSearchMatch>();
+    for (const match of searchMatches) {
+      nextMatches.set(match.itemIndex, match);
+    }
+    return nextMatches;
+  }, [searchMatches]);
+
+  useEffect(() => {
+    if (!shouldRender) {
+      setTextItems([]);
+      onTextItemsChange(pageNumber, []);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    void pdfDocument.getPage(pageNumber)
+      .then(async (page) => {
+        if (cancelled || typeof page.getTextContent !== 'function') {
+          return [];
+        }
+
+        const viewport = page.getViewport({ scale: zoom });
+        const textContent = await page.getTextContent();
+        const viewportTransform = normalizeTransform(
+          viewport.transform,
+          [zoom, 0, 0, -zoom, 0, viewport.height],
+        );
+
+        return (textContent.items as Array<{ str?: string; transform?: number[]; width?: number; height?: number }>)
+          .map((item, itemIndex) => {
+            const text = item.str ?? '';
+            const itemTransform = normalizeTransform(item.transform, [1, 0, 0, 1, 0, 0]);
+            const transform = multiplyTransform(viewportTransform, itemTransform);
+            const height = Math.max(1, Math.hypot(transform[2], transform[3]) || (item.height ?? 10) * zoom);
+            const width = Math.max(1, (item.width ?? text.length * 7) * zoom);
+
+            return {
+              itemIndex,
+              text,
+              left: transform[4],
+              top: transform[5] - height,
+              width,
+              height,
+            };
+          })
+          .filter((item) => item.text.length > 0);
+      })
+      .then((items) => {
+        if (!cancelled) {
+          setTextItems(items);
+          onTextItemsChange(pageNumber, items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTextItems([]);
+          onTextItemsChange(pageNumber, []);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onTextItemsChange, pageNumber, pdfDocument, shouldRender, zoom]);
+
+  if (!shouldRender || textItems.length === 0) {
+    return null;
+  }
+
   return (
     <div
-      data-pdf-page-number={pageNumber}
-      data-testid={`pdf-viewer-page-${pageNumber}`}
-      className="flex justify-center"
-      style={{ marginBottom: PDF_VIEWER_PAGE_GAP_PX }}
+      data-testid={`pdf-viewer-text-layer-${pageNumber}`}
+      className={[
+        'absolute inset-0 overflow-hidden',
+        toolMode === 'hand' ? 'pointer-events-none select-none' : 'select-text',
+      ].join(' ')}
+      style={{ height: pageSize.height, width: pageSize.width }}
+    >
+      {textItems.map((item) => {
+        const match = matchByItemIndex.get(item.itemIndex);
+        const isActiveMatch = match?.globalIndex === activeSearchMatchIndex;
+        return (
+          <span
+            key={`${pageNumber}-${item.itemIndex}`}
+            data-testid={match ? 'pdf-viewer-search-highlight' : undefined}
+            data-pdf-search-match-index={match?.globalIndex}
+            className={[
+              'absolute whitespace-pre text-transparent selection:bg-sky-400/35',
+              match ? 'rounded-sm bg-amber-300/35' : '',
+              isActiveMatch ? 'outline outline-1 outline-amber-200 bg-amber-300/60' : '',
+            ].join(' ')}
+            style={{
+              left: item.left,
+              top: item.top,
+              width: item.width,
+              height: item.height,
+              fontSize: item.height,
+              lineHeight: '1',
+            }}
+          >
+            {item.text}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function PdfThumbnailCanvas({
+  pageNumber,
+  pdfDocument,
+  isActive,
+  shouldRender,
+  onClick,
+}: PdfThumbnailCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [thumbnailSize, setThumbnailSize] = useState<PdfPageSize>({ width: PDF_VIEWER_THUMBNAIL_WIDTH_PX, height: 104 });
+
+  useEffect(() => {
+    if (!shouldRender) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let renderTask: ReturnType<PDFPageProxy['render']> | null = null;
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d');
+
+    if (!canvas || !context) {
+      return undefined;
+    }
+
+    void pdfDocument.getPage(pageNumber)
+      .then((page) => {
+        if (cancelled) {
+          return undefined;
+        }
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        const scale = PDF_VIEWER_THUMBNAIL_WIDTH_PX / Math.max(1, baseViewport.width);
+        const viewport = page.getViewport({ scale });
+        const outputScale = Math.max(window.devicePixelRatio || 1, 1);
+        setThumbnailSize({ width: viewport.width, height: viewport.height });
+        canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+        renderTask = page.render({ canvas, canvasContext: context, viewport });
+        return renderTask.promise;
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel?.();
+    };
+  }, [pageNumber, pdfDocument, shouldRender]);
+
+  return (
+    <button
+      type="button"
+      data-testid={`pdf-viewer-thumbnail-${pageNumber}`}
+      aria-label={`Go to page ${pageNumber}`}
+      aria-current={isActive ? 'page' : undefined}
+      onClick={onClick}
+      className={[
+        'flex w-full flex-col items-center gap-1 rounded-md border px-1.5 py-1.5 text-[10px] transition-colors',
+        isActive
+          ? 'border-ide-accent bg-ide-accent/15 text-ide-text'
+          : 'border-transparent text-ide-text-muted hover:border-ide-border hover:bg-ide-hover hover:text-ide-text',
+      ].join(' ')}
     >
       {shouldRender ? (
         <canvas
           ref={canvasRef}
-          data-testid={`pdf-viewer-page-canvas-${pageNumber}`}
-          className="block rounded-sm bg-white shadow-[0_10px_35px_rgba(0,0,0,0.35)]"
-          style={pageStyle}
+          className="rounded-sm bg-white shadow-sm"
+          style={{ width: thumbnailSize.width, height: thumbnailSize.height }}
         />
       ) : (
         <div
-          data-testid={`pdf-viewer-page-placeholder-${pageNumber}`}
-          className="rounded-sm border border-ide-border bg-ide-tab-bg/70"
-          style={pageStyle}
+          className="rounded-sm border border-ide-border bg-ide-tab-bg"
+          style={{ width: thumbnailSize.width, height: thumbnailSize.height }}
         />
       )}
-    </div>
+      <span>{pageNumber}</span>
+    </button>
   );
 }
 
@@ -222,18 +514,42 @@ export function PdfViewerPane({
   dragInteractionShieldTestId,
 }: PdfViewerPaneProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const restoredScrollForFileRef = useRef<string | null>(null);
+  const handDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [pageSizes, setPageSizes] = useState<Record<number, PdfPageSize>>({});
+  const [pageTextItems, setPageTextItems] = useState<Record<number, PdfTextItem[]>>({});
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [isHandDragging, setIsHandDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const { pageNumber, zoom } = usePdfViewerStore((state) => state.getSession(fileId));
+  const {
+    activeSearchMatchIndex,
+    fitMode,
+    isSearchOpen,
+    pageNumber,
+    searchQuery,
+    toolMode,
+    zoom,
+  } = usePdfViewerStore((state) => state.getSession(fileId));
+  const setActiveSearchMatchIndex = usePdfViewerStore((state) => state.setActiveSearchMatchIndex);
+  const setFitMode = usePdfViewerStore((state) => state.setFitMode);
   const setPageNumber = usePdfViewerStore((state) => state.setPageNumber);
   const setPageNumberFromViewport = usePdfViewerStore((state) => state.setPageNumberFromViewport);
   const setScrollPosition = usePdfViewerStore((state) => state.setScrollPosition);
+  const setSearchOpen = usePdfViewerStore((state) => state.setSearchOpen);
+  const setSearchQuery = usePdfViewerStore((state) => state.setSearchQuery);
+  const setToolMode = usePdfViewerStore((state) => state.setToolMode);
   const setZoom = usePdfViewerStore((state) => state.setZoom);
   const canGoPrevious = pageNumber > 1;
   const canGoNext = pageCount > 0 && pageNumber < pageCount;
@@ -245,10 +561,38 @@ export function PdfViewerPane({
     start: Math.max(1, pageNumber - PDF_VIEWER_RENDER_OVERSCAN),
     end: Math.min(pageCount, pageNumber + PDF_VIEWER_RENDER_OVERSCAN),
   }), [pageCount, pageNumber]);
+  const renderedThumbnailRange = useMemo(() => ({
+    start: Math.max(1, pageNumber - PDF_VIEWER_THUMBNAIL_OVERSCAN),
+    end: Math.min(pageCount, pageNumber + PDF_VIEWER_THUMBNAIL_OVERSCAN),
+  }), [pageCount, pageNumber]);
+  const normalizedSearchQuery = getNormalizedSearchQuery(searchQuery);
+  const searchMatches = useMemo(() => {
+    if (!normalizedSearchQuery) {
+      return [];
+    }
+
+    const matches: PdfSearchMatch[] = [];
+    for (const currentPageNumber of pageNumbers) {
+      const items = pageTextItems[currentPageNumber] ?? [];
+      for (const item of items) {
+        if (item.text.toLowerCase().includes(normalizedSearchQuery)) {
+          matches.push({
+            pageNumber: currentPageNumber,
+            itemIndex: item.itemIndex,
+            globalIndex: matches.length,
+          });
+        }
+      }
+    }
+
+    return matches;
+  }, [normalizedSearchQuery, pageNumbers, pageTextItems]);
+  const activeSearchMatch = searchMatches[activeSearchMatchIndex] ?? null;
 
   useEffect(() => {
     restoredScrollForFileRef.current = null;
     setPageSizes({});
+    setPageTextItems({});
   }, [fileId, reloadToken]);
 
   useEffect(() => {
@@ -310,6 +654,31 @@ export function PdfViewerPane({
   }, [fileId, reloadToken, setPageNumber]);
 
   useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return undefined;
+    }
+
+    const updateViewportSize = () => {
+      setViewportSize({
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+      });
+    };
+
+    updateViewportSize();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateViewportSize);
+      return () => window.removeEventListener('resize', updateViewportSize);
+    }
+
+    const resizeObserver = new ResizeObserver(updateViewportSize);
+    resizeObserver.observe(viewport);
+    return () => resizeObserver.disconnect();
+  }, [pdfDocument]);
+
+  useEffect(() => {
     if (!pdfDocument || pageCount === 0 || restoredScrollForFileRef.current === fileId) {
       return undefined;
     }
@@ -338,6 +707,19 @@ export function PdfViewerPane({
       return {
         ...current,
         [nextPageNumber]: size,
+      };
+    });
+  }, []);
+
+  const handleTextItemsChange = useCallback((nextPageNumber: number, items: PdfTextItem[]) => {
+    setPageTextItems((current) => {
+      if (current[nextPageNumber] === items) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [nextPageNumber]: items,
       };
     });
   }, []);
@@ -373,10 +755,14 @@ export function PdfViewerPane({
     setPageNumber(fileId, normalizedPageNumber, pageCount);
   }, [fileId, pageCount, pageSizes, setPageNumber, setScrollPosition, zoom]);
 
-  const updateZoom = useCallback((nextZoom: number, anchor?: { clientX: number; clientY: number }) => {
+  const updateZoom = useCallback((
+    nextZoom: number,
+    anchor?: { clientX: number; clientY: number },
+    nextFitMode: PdfViewerFitMode = 'custom',
+  ) => {
     const viewport = viewportRef.current;
     const normalizedZoom = clampZoom(nextZoom);
-    if (normalizedZoom === zoom) {
+    if (normalizedZoom === zoom && fitMode === nextFitMode) {
       return;
     }
 
@@ -392,7 +778,7 @@ export function PdfViewerPane({
       nextScrollTop = anchorY * zoomRatio - (anchor.clientY - rect.top);
     }
 
-    setZoom(fileId, normalizedZoom);
+    setZoom(fileId, normalizedZoom, nextFitMode);
 
     if (viewport && nextScrollLeft !== null && nextScrollTop !== null) {
       window.requestAnimationFrame(() => {
@@ -403,7 +789,65 @@ export function PdfViewerPane({
         });
       });
     }
-  }, [fileId, setScrollPosition, setZoom, zoom]);
+  }, [fileId, fitMode, setScrollPosition, setZoom, zoom]);
+
+  const applyFitMode = useCallback((nextFitMode: Exclude<PdfViewerFitMode, 'custom'>) => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      setFitMode(fileId, nextFitMode);
+      return;
+    }
+
+    const baseSize = pageSizes[pageNumber] ?? PDF_VIEWER_DEFAULT_PAGE_SIZE;
+    const availableWidth = Math.max(1, viewport.clientWidth - PDF_VIEWER_VIEWPORT_PADDING_X);
+    const availableHeight = Math.max(1, viewport.clientHeight - PDF_VIEWER_VIEWPORT_PADDING_Y);
+    const widthZoom = availableWidth / Math.max(1, baseSize.width);
+    const nextZoom = nextFitMode === 'width'
+      ? widthZoom
+      : Math.min(widthZoom, availableHeight / Math.max(1, baseSize.height));
+
+    updateZoom(nextZoom, undefined, nextFitMode);
+  }, [fileId, pageNumber, pageSizes, setFitMode, updateZoom]);
+
+  useEffect(() => {
+    if (fitMode === 'custom' || pageCount === 0) {
+      return;
+    }
+
+    applyFitMode(fitMode);
+  }, [applyFitMode, fitMode, pageCount, viewportSize.height, viewportSize.width]);
+
+  useEffect(() => {
+    if (!activeSearchMatch) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const viewport = viewportRef.current;
+      const matchElement = viewport?.querySelector<HTMLElement>(
+        `[data-pdf-search-match-index="${activeSearchMatch.globalIndex}"]`,
+      );
+      if (matchElement && typeof matchElement.scrollIntoView === 'function') {
+        matchElement.scrollIntoView({ block: 'center', inline: 'center' });
+      } else if (viewport) {
+        scrollToPage(activeSearchMatch.pageNumber);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeSearchMatch, scrollToPage]);
+
+  useEffect(() => {
+    if (activeSearchMatchIndex >= searchMatches.length && searchMatches.length > 0) {
+      setActiveSearchMatchIndex(fileId, searchMatches.length - 1, searchMatches.length);
+    }
+  }, [activeSearchMatchIndex, fileId, searchMatches.length, setActiveSearchMatchIndex]);
+
+  useEffect(() => {
+    if (isSearchOpen) {
+      searchInputRef.current?.focus();
+    }
+  }, [isSearchOpen]);
 
   const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     if (event.ctrlKey) {
@@ -427,12 +871,95 @@ export function PdfViewerPane({
     }
   }, [fileId, setScrollPosition, updateZoom, zoom]);
 
+  const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (toolMode !== 'hand' || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const viewport = event.currentTarget;
+    handDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+    };
+    viewport.setPointerCapture?.(event.pointerId);
+    setIsHandDragging(true);
+  }, [toolMode]);
+
+  const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const dragState = handDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const viewport = event.currentTarget;
+    setViewportScroll(
+      viewport,
+      dragState.scrollLeft - (event.clientX - dragState.startX),
+      dragState.scrollTop - (event.clientY - dragState.startY),
+    );
+    setScrollPosition(fileId, {
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+    });
+  }, [fileId, setScrollPosition]);
+
+  const handlePointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (handDragRef.current?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      handDragRef.current = null;
+      setIsHandDragging(false);
+    }
+  }, []);
+
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      setSearchOpen(fileId, true);
+    }
+  }, [fileId, setSearchOpen]);
+
   const handlePreviousPage = () => scrollToPage(pageNumber - 1);
   const handleNextPage = () => scrollToPage(pageNumber + 1);
   const handleZoomOut = () => updateZoom(zoom - PDF_VIEWER_ZOOM_STEP);
   const handleZoomIn = () => updateZoom(zoom + PDF_VIEWER_ZOOM_STEP);
   const handleResetZoom = () => updateZoom(PDF_VIEWER_DEFAULT_ZOOM);
   const handleRetry = () => setReloadToken((current) => current + 1);
+  const handleWidthFit = () => {
+    setFitMode(fileId, 'width');
+    applyFitMode('width');
+  };
+  const handlePageFit = () => {
+    setFitMode(fileId, 'page');
+    applyFitMode('page');
+  };
+  const handleSelectTool = () => setToolMode(fileId, 'select');
+  const handleHandTool = () => setToolMode(fileId, 'hand');
+  const handleSearchToggle = () => setSearchOpen(fileId, !isSearchOpen);
+  const handleSearchClear = () => {
+    setSearchQuery(fileId, '');
+    setSearchOpen(fileId, false);
+  };
+  const handleSearchPrevious = () => {
+    if (searchMatches.length === 0) {
+      return;
+    }
+    setActiveSearchMatchIndex(
+      fileId,
+      (activeSearchMatchIndex - 1 + searchMatches.length) % searchMatches.length,
+      searchMatches.length,
+    );
+  };
+  const handleSearchNext = () => {
+    if (searchMatches.length === 0) {
+      return;
+    }
+    setActiveSearchMatchIndex(fileId, (activeSearchMatchIndex + 1) % searchMatches.length, searchMatches.length);
+  };
 
   return (
     <div data-testid="pdf-viewer-pane" className="relative flex min-h-0 flex-1 flex-col bg-ide-editor-bg text-ide-text">
@@ -472,6 +999,71 @@ export function PdfViewerPane({
             </button>
           </TooltipIconButton>
           <div className="mx-1 h-4 w-px bg-ide-border" />
+          <TooltipIconButton content="Select Text">
+            <button
+              type="button"
+              aria-label="Select Text"
+              aria-pressed={toolMode === 'select'}
+              data-testid="pdf-viewer-select-tool"
+              disabled={isLoading}
+              onClick={handleSelectTool}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                toolMode === 'select' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <MousePointer2 size={14} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Hand Tool">
+            <button
+              type="button"
+              aria-label="Hand Tool"
+              aria-pressed={toolMode === 'hand'}
+              data-testid="pdf-viewer-hand-tool"
+              disabled={isLoading}
+              onClick={handleHandTool}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                toolMode === 'hand' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <Hand size={14} />
+            </button>
+          </TooltipIconButton>
+          <div className="mx-1 h-4 w-px bg-ide-border" />
+          <TooltipIconButton content="Fit Width">
+            <button
+              type="button"
+              aria-label="Fit Width"
+              aria-pressed={fitMode === 'width'}
+              data-testid="pdf-viewer-fit-width"
+              disabled={isLoading || !pdfDocument}
+              onClick={handleWidthFit}
+              className={[
+                'rounded px-2 py-1 text-[11px] transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                fitMode === 'width' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              Width
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Fit Page">
+            <button
+              type="button"
+              aria-label="Fit Page"
+              aria-pressed={fitMode === 'page'}
+              data-testid="pdf-viewer-fit-page"
+              disabled={isLoading || !pdfDocument}
+              onClick={handlePageFit}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                fitMode === 'page' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <Maximize2 size={14} />
+            </button>
+          </TooltipIconButton>
           <TooltipIconButton content="Zoom Out">
             <button
               type="button"
@@ -511,8 +1103,91 @@ export function PdfViewerPane({
               <RotateCcw size={14} />
             </button>
           </TooltipIconButton>
+          <div className="mx-1 h-4 w-px bg-ide-border" />
+          <TooltipIconButton content="Search PDF">
+            <button
+              type="button"
+              aria-label="Search PDF"
+              aria-pressed={isSearchOpen}
+              data-testid="pdf-viewer-search-toggle"
+              disabled={isLoading || !pdfDocument}
+              onClick={handleSearchToggle}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                isSearchOpen ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <Search size={14} />
+            </button>
+          </TooltipIconButton>
         </div>
       </div>
+      {isSearchOpen && (
+        <div
+          data-testid="pdf-viewer-search-bar"
+          className="flex h-9 shrink-0 items-center gap-2 border-b border-ide-border bg-ide-editor-bg px-2 text-[12px]"
+        >
+          <Search size={14} className="text-ide-text-muted" />
+          <input
+            ref={searchInputRef}
+            aria-label="Search PDF text"
+            data-testid="pdf-viewer-search-input"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(fileId, event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && event.shiftKey) {
+                handleSearchPrevious();
+              } else if (event.key === 'Enter') {
+                handleSearchNext();
+              } else if (event.key === 'Escape') {
+                handleSearchClear();
+              }
+            }}
+            placeholder="Search PDF"
+            className="h-6 min-w-0 flex-1 rounded border border-ide-border bg-ide-tab-bg px-2 text-[12px] text-ide-text outline-none placeholder:text-ide-text-muted focus:border-ide-accent"
+          />
+          <span data-testid="pdf-viewer-search-count" className="min-w-16 text-right text-ide-text-muted">
+            {normalizedSearchQuery
+              ? `${searchMatches.length === 0 ? 0 : activeSearchMatchIndex + 1} / ${searchMatches.length}`
+              : '0 / 0'}
+          </span>
+          <TooltipIconButton content="Previous Match">
+            <button
+              type="button"
+              aria-label="Previous Match"
+              data-testid="pdf-viewer-search-prev"
+              disabled={searchMatches.length === 0}
+              onClick={handleSearchPrevious}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <ChevronLeft size={14} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Next Match">
+            <button
+              type="button"
+              aria-label="Next Match"
+              data-testid="pdf-viewer-search-next"
+              disabled={searchMatches.length === 0}
+              onClick={handleSearchNext}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Close Search">
+            <button
+              type="button"
+              aria-label="Close Search"
+              data-testid="pdf-viewer-search-close"
+              onClick={handleSearchClear}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text"
+            >
+              <X size={14} />
+            </button>
+          </TooltipIconButton>
+        </div>
+      )}
       {loadError ? (
         <div className="flex min-h-0 flex-1 items-center justify-center px-8 text-center">
           <div className="max-w-md">
@@ -530,49 +1205,102 @@ export function PdfViewerPane({
           </div>
         </div>
       ) : (
-        <div
-          ref={viewportRef}
-          data-testid="pdf-viewer-scroll-viewport"
-          tabIndex={0}
-          onScroll={handleViewportScroll}
-          onWheel={handleWheel}
-          className="min-h-0 flex-1 overflow-auto bg-ide-editor-bg focus:outline-none"
-        >
-          <div className="min-w-full px-6 py-6">
-            <div className="relative mx-auto w-max max-w-none">
-              {isLoading && (
-                <div
-                  data-testid="pdf-viewer-loading"
-                  className="absolute inset-0 z-10 flex min-h-40 items-center justify-center rounded border border-ide-border bg-ide-editor-bg/85 text-[12px] text-ide-text-muted"
-                >
-                  Loading PDF...
-                </div>
-              )}
-              {renderError && (
-                <div
-                  data-testid="pdf-viewer-render-error"
-                  className="mb-3 rounded border border-ide-error/40 bg-ide-error/10 px-3 py-2 text-[12px] text-ide-error"
-                >
-                  {renderError}
-                </div>
-              )}
-              {pdfDocument && pageNumbers.map((currentPageNumber) => {
-                const shouldRender = currentPageNumber >= renderedPageRange.start && currentPageNumber <= renderedPageRange.end;
-                return (
-                  <PdfPageCanvas
+        <div className="flex min-h-0 flex-1">
+          <div
+            ref={viewportRef}
+            data-testid="pdf-viewer-scroll-viewport"
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            onScroll={handleViewportScroll}
+            onWheel={handleWheel}
+            className={[
+              'min-h-0 flex-1 overflow-auto bg-ide-editor-bg focus:outline-none',
+              toolMode === 'hand' ? (isHandDragging ? 'cursor-grabbing' : 'cursor-grab') : '',
+            ].join(' ')}
+          >
+            <div className="min-w-full px-6 py-6">
+              <div className="relative mx-auto w-max max-w-none">
+                {isLoading && (
+                  <div
+                    data-testid="pdf-viewer-loading"
+                    className="absolute inset-0 z-10 flex min-h-40 items-center justify-center rounded border border-ide-border bg-ide-editor-bg/85 text-[12px] text-ide-text-muted"
+                  >
+                    Loading PDF...
+                  </div>
+                )}
+                {renderError && (
+                  <div
+                    data-testid="pdf-viewer-render-error"
+                    className="mb-3 rounded border border-ide-error/40 bg-ide-error/10 px-3 py-2 text-[12px] text-ide-error"
+                  >
+                    {renderError}
+                  </div>
+                )}
+                {pdfDocument && pageNumbers.map((currentPageNumber) => {
+                  const shouldRender = currentPageNumber >= renderedPageRange.start && currentPageNumber <= renderedPageRange.end;
+                  const pageSize = getPageSize(pageSizes, currentPageNumber, zoom);
+                  return (
+                    <div
+                      key={currentPageNumber}
+                      data-pdf-page-number={currentPageNumber}
+                      data-testid={`pdf-viewer-page-${currentPageNumber}`}
+                      className="flex justify-center"
+                      style={{ marginBottom: PDF_VIEWER_PAGE_GAP_PX }}
+                    >
+                      <div className="relative" style={{ height: pageSize.height, width: pageSize.width }}>
+                        <PdfPageCanvas
+                          pageNumber={currentPageNumber}
+                          pdfDocument={pdfDocument}
+                          zoom={zoom}
+                          shouldRender={shouldRender}
+                          pageSize={pageSize}
+                          onPageSizeChange={handlePageSizeChange}
+                          onRenderError={setRenderError}
+                        />
+                        <PdfPageTextLayer
+                          pageNumber={currentPageNumber}
+                          pdfDocument={pdfDocument}
+                          zoom={zoom}
+                          shouldRender={shouldRender}
+                          pageSize={pageSize}
+                          toolMode={toolMode}
+                          searchMatches={searchMatches.filter((match) => match.pageNumber === currentPageNumber)}
+                          activeSearchMatchIndex={activeSearchMatchIndex}
+                          onTextItemsChange={handleTextItemsChange}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          {pdfDocument && pageCount > 0 && (
+            <div
+              data-testid="pdf-viewer-thumbnail-rail"
+              className="w-[108px] shrink-0 overflow-y-auto border-l border-ide-border bg-ide-tab-bg/80 px-2 py-2"
+            >
+              <div className="flex flex-col gap-2">
+                {pageNumbers.map((currentPageNumber) => (
+                  <PdfThumbnailCanvas
                     key={currentPageNumber}
                     pageNumber={currentPageNumber}
                     pdfDocument={pdfDocument}
-                    zoom={zoom}
-                    shouldRender={shouldRender}
-                    pageSize={getPageSize(pageSizes, currentPageNumber, zoom)}
-                    onPageSizeChange={handlePageSizeChange}
-                    onRenderError={setRenderError}
+                    isActive={currentPageNumber === pageNumber}
+                    shouldRender={
+                      currentPageNumber >= renderedThumbnailRange.start
+                      && currentPageNumber <= renderedThumbnailRange.end
+                    }
+                    onClick={() => scrollToPage(currentPageNumber)}
                   />
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
       {showDragInteractionShield && (

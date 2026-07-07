@@ -4730,8 +4730,11 @@ test('file tree opens PDF files in the center editor tab', async () => {
   const firstPageCanvas = window.getByTestId('pdf-viewer-page-canvas-1');
   const secondPageCanvas = window.getByTestId('pdf-viewer-page-canvas-2');
   await expect(viewport).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-1')).toHaveAttribute('aria-current', 'page');
   await expect(firstPageCanvas).toBeVisible();
   await expect(secondPageCanvas).toBeAttached();
+  await expect(window.getByTestId('pdf-viewer-text-layer-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
     timeout: UI_READY_TIMEOUT_MS,
   }).toBeGreaterThan(0);
@@ -4742,24 +4745,47 @@ test('file tree opens PDF files in the center editor tab', async () => {
   await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
     timeout: UI_READY_TIMEOUT_MS,
   });
+  await expect(window.getByTestId('pdf-viewer-thumbnail-2')).toHaveAttribute('aria-current', 'page');
 
+  await window.getByTestId('pdf-viewer-fit-page').click();
+  await expect(window.getByTestId('pdf-viewer-fit-page')).toHaveAttribute('aria-pressed', 'true');
+  await window.getByTestId('pdf-viewer-fit-width').click();
+  await expect(window.getByTestId('pdf-viewer-fit-width')).toHaveAttribute('aria-pressed', 'true');
+
+  const fitWidthZoom = await window.getByTestId('pdf-viewer-zoom-indicator').textContent();
+  const zoomViewportBox = await viewport.boundingBox();
+  if (!zoomViewportBox) {
+    throw new Error('Expected PDF viewport bounds before zoom.');
+  }
+  await window.mouse.move(zoomViewportBox.x + zoomViewportBox.width / 2, zoomViewportBox.y + zoomViewportBox.height / 2);
+  await viewport.click();
   await window.keyboard.down('Control');
   await window.mouse.wheel(0, -400);
   await window.keyboard.up('Control');
-  await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('125%');
-  await expect.poll(async () => secondPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+  await expect.poll(async () => {
+    const zoomText = await window.getByTestId('pdf-viewer-zoom-indicator').textContent();
+    return Number(zoomText?.replace('%', '') ?? 0);
+  }, {
     timeout: UI_READY_TIMEOUT_MS,
-  }).toBeGreaterThan(initialCanvasWidth);
+  }).toBeGreaterThan(Number(fitWidthZoom?.replace('%', '') ?? 0));
+  await expect(window.getByTestId('pdf-viewer-fit-width')).toHaveAttribute('aria-pressed', 'false');
 
+  await window.getByTestId('pdf-viewer-thumbnail-2').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2');
   await window.getByTestId('pdf-viewer-prev-page').click();
   await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2');
   await window.getByTestId('pdf-viewer-next-page').click();
   await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2');
 
+  await window.getByTestId('pdf-viewer-reset-zoom').click();
+  await window.getByTestId('pdf-viewer-zoom-in').click();
   await window.getByTestId('pdf-viewer-zoom-in').click();
   await window.getByTestId('pdf-viewer-zoom-in').click();
   await window.getByTestId('pdf-viewer-zoom-in').click();
   await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('200%');
+  await expect.poll(async () => secondPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(initialCanvasWidth);
   const horizontalBefore = await viewport.evaluate((element) => Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0));
   const horizontalDelta = horizontalBefore > 0 ? -700 : 700;
   await viewport.dispatchEvent('wheel', {
@@ -4777,6 +4803,40 @@ test('file tree opens PDF files in the center editor tab', async () => {
       timeout: UI_READY_TIMEOUT_MS,
     }).toBeLessThan(horizontalBefore);
   }
+
+  await window.getByTestId('pdf-viewer-hand-tool').click();
+  await expect(window.getByTestId('pdf-viewer-hand-tool')).toHaveAttribute('aria-pressed', 'true');
+  const handScrollBefore = await viewport.evaluate((element) => ({
+    left: Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0),
+    top: Number((element as unknown as { scrollTop?: number }).scrollTop ?? 0),
+  }));
+  const viewportBox = await viewport.boundingBox();
+  if (!viewportBox) {
+    throw new Error('Expected PDF viewport bounds.');
+  }
+  await window.mouse.move(viewportBox.x + viewportBox.width / 2, viewportBox.y + viewportBox.height / 2);
+  await window.mouse.down();
+  await window.mouse.move(viewportBox.x + viewportBox.width / 2 - 90, viewportBox.y + viewportBox.height / 2 - 90);
+  await window.mouse.up();
+  await expect.poll(async () => viewport.evaluate((element) => ({
+    left: Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0),
+    top: Number((element as unknown as { scrollTop?: number }).scrollTop ?? 0),
+  })), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).not.toEqual(handScrollBefore);
+
+  await window.getByTestId('pdf-viewer-select-tool').click();
+  await expect(window.getByTestId('pdf-viewer-select-tool')).toHaveAttribute('aria-pressed', 'true');
+  await viewport.click();
+  await window.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
+  await expect(window.getByTestId('pdf-viewer-search-input')).toBeVisible();
+  await window.getByTestId('pdf-viewer-search-input').fill('Pristine');
+  await expect(window.getByTestId('pdf-viewer-search-count')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-search-highlight').first()).toBeVisible();
+  await window.getByTestId('pdf-viewer-search-next').click();
+  await expect(window.getByTestId('pdf-viewer-search-count')).toContainText('2 / 2');
 
   await app.close();
 });
