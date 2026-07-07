@@ -15,6 +15,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Contrast,
   Hand,
   Highlighter,
   Maximize2,
@@ -38,10 +39,17 @@ import {
   type PdfHighlightAnnotation,
   type PdfHighlightRect,
   type PdfViewerFitMode,
+  type PdfViewerPageToneMode,
   type PdfViewerToolMode,
   usePdfViewerStore,
 } from '../../../pdf/usePdfViewerStore';
 import { isAbsoluteFilePath } from '../../../workspace/workspaceFiles';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { TooltipIconButton } from '../../ui/tooltip-icon-button';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -54,6 +62,14 @@ const PDF_VIEWER_VIEWPORT_PADDING_X = 48;
 const PDF_VIEWER_VIEWPORT_PADDING_Y = 48;
 const PDF_VIEWER_THUMBNAIL_WIDTH_PX = 78;
 const PDF_VIEWER_THUMBNAIL_OVERSCAN = 4;
+const PDF_VIEWER_SOFT_PAGE_FILTER = 'brightness(0.9) contrast(0.96)';
+const PDF_VIEWER_AUTO_PAGE_FILTER_CLASS = 'dark:[filter:brightness(0.9)_contrast(0.96)]';
+
+const PDF_VIEWER_PAGE_TONE_OPTIONS: Array<{ value: PdfViewerPageToneMode; label: string }> = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'original', label: 'Original' },
+  { value: 'soft', label: 'Soft page' },
+];
 
 interface PdfViewerPaneProps {
   fileId: string;
@@ -107,6 +123,7 @@ interface PdfPageCanvasProps {
   zoom: number;
   shouldRender: boolean;
   pageSize: PdfPageSize;
+  pageToneMode: PdfViewerPageToneMode;
   onPageSizeChange: (pageNumber: number, size: PdfPageSize) => void;
   onRenderError: (message: string | null) => void;
 }
@@ -145,6 +162,7 @@ interface PdfThumbnailCanvasProps {
   pdfDocument: PDFDocumentProxy;
   isActive: boolean;
   shouldRender: boolean;
+  pageToneMode: PdfViewerPageToneMode;
   onClick: () => void;
 }
 
@@ -174,6 +192,18 @@ function cleanupPdfDocument(document: PDFDocumentProxy | null): void {
 
 function clampZoom(zoom: number): number {
   return Math.round(Math.min(Math.max(zoom, PDF_VIEWER_MIN_ZOOM), PDF_VIEWER_MAX_ZOOM) * 100) / 100;
+}
+
+function getPageToneLabel(mode: PdfViewerPageToneMode): string {
+  return PDF_VIEWER_PAGE_TONE_OPTIONS.find((option) => option.value === mode)?.label ?? 'Auto';
+}
+
+function getPageToneCanvasClassName(mode: PdfViewerPageToneMode): string {
+  return mode === 'auto' ? PDF_VIEWER_AUTO_PAGE_FILTER_CLASS : '';
+}
+
+function getPageToneCanvasStyle(mode: PdfViewerPageToneMode): CSSProperties {
+  return mode === 'soft' ? { filter: PDF_VIEWER_SOFT_PAGE_FILTER } : {};
 }
 
 function getPageSize(pageSizes: Record<number, PdfPageSize>, pageNumber: number, zoom: number): PdfPageSize {
@@ -347,6 +377,7 @@ function PdfPageCanvas({
   zoom,
   shouldRender,
   pageSize,
+  pageToneMode,
   onPageSizeChange,
   onRenderError,
 }: PdfPageCanvasProps) {
@@ -420,8 +451,15 @@ function PdfPageCanvas({
     <canvas
       ref={canvasRef}
       data-testid={`pdf-viewer-page-canvas-${pageNumber}`}
-      className="block rounded-sm bg-white shadow-[0_10px_35px_rgba(0,0,0,0.35)]"
-      style={pageStyle}
+      data-pdf-page-tone-mode={pageToneMode}
+      className={[
+        'block rounded-sm bg-white shadow-[0_10px_35px_rgba(0,0,0,0.35)]',
+        getPageToneCanvasClassName(pageToneMode),
+      ].filter(Boolean).join(' ')}
+      style={{
+        ...pageStyle,
+        ...getPageToneCanvasStyle(pageToneMode),
+      }}
     />
   );
 }
@@ -704,6 +742,7 @@ function PdfThumbnailCanvas({
   pdfDocument,
   isActive,
   shouldRender,
+  pageToneMode,
   onClick,
 }: PdfThumbnailCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -767,8 +806,17 @@ function PdfThumbnailCanvas({
       {shouldRender ? (
         <canvas
           ref={canvasRef}
-          className="rounded-sm bg-white shadow-sm"
-          style={{ width: thumbnailSize.width, height: thumbnailSize.height }}
+          data-testid={`pdf-viewer-thumbnail-canvas-${pageNumber}`}
+          data-pdf-page-tone-mode={pageToneMode}
+          className={[
+            'rounded-sm bg-white shadow-sm',
+            getPageToneCanvasClassName(pageToneMode),
+          ].filter(Boolean).join(' ')}
+          style={{
+            width: thumbnailSize.width,
+            height: thumbnailSize.height,
+            ...getPageToneCanvasStyle(pageToneMode),
+          }}
         />
       ) : (
         <div
@@ -892,6 +940,7 @@ export function PdfViewerPane({
     isSearchOpen,
     isThumbnailRailVisible,
     pageNumber,
+    pageToneMode,
     searchQuery,
     toolMode,
     zoom,
@@ -907,6 +956,7 @@ export function PdfViewerPane({
   const setScrollPosition = usePdfViewerStore((state) => state.setScrollPosition);
   const setSearchOpen = usePdfViewerStore((state) => state.setSearchOpen);
   const setSearchQuery = usePdfViewerStore((state) => state.setSearchQuery);
+  const setPageToneMode = usePdfViewerStore((state) => state.setPageToneMode);
   const setToolMode = usePdfViewerStore((state) => state.setToolMode);
   const setZoom = usePdfViewerStore((state) => state.setZoom);
   const canGoPrevious = pageNumber > 1;
@@ -1561,6 +1611,42 @@ export function PdfViewerPane({
               <Highlighter size={14} />
             </button>
           </TooltipIconButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Page tone"
+                title={`Page tone: ${getPageToneLabel(pageToneMode)}`}
+                data-testid="pdf-viewer-page-tone-menu"
+                disabled={isLoading || !pdfDocument}
+                className={[
+                  'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                  pageToneMode === 'auto' ? 'text-ide-text-muted hover:text-ide-text' : 'bg-ide-hover text-ide-text',
+                ].join(' ')}
+              >
+                <Contrast size={14} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="border-ide-border bg-ide-panel text-ide-text"
+            >
+              {PDF_VIEWER_PAGE_TONE_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option.value}
+                  data-testid={`pdf-viewer-page-tone-${option.value}`}
+                  data-selected={pageToneMode === option.value ? 'true' : undefined}
+                  onSelect={() => setPageToneMode(fileId, option.value)}
+                  className={[
+                    'text-[12px] text-ide-text focus:bg-ide-hover focus:text-ide-text',
+                    pageToneMode === option.value ? 'bg-ide-hover' : '',
+                  ].join(' ')}
+                >
+                  {option.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className="mx-1 h-4 w-px bg-ide-border" />
           <TooltipIconButton content="Fit Width">
             <button
@@ -1801,6 +1887,7 @@ export function PdfViewerPane({
                           zoom={zoom}
                           shouldRender={shouldRender}
                           pageSize={pageSize}
+                          pageToneMode={pageToneMode}
                           onPageSizeChange={handlePageSizeChange}
                           onRenderError={setRenderError}
                         />
@@ -1854,6 +1941,7 @@ export function PdfViewerPane({
                       currentPageNumber >= renderedThumbnailRange.start
                       && currentPageNumber <= renderedThumbnailRange.end
                     }
+                    pageToneMode={pageToneMode}
                     onClick={() => scrollToPage(currentPageNumber)}
                   />
                 ))}

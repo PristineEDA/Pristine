@@ -4773,6 +4773,51 @@ test('file tree opens PDF files in the center editor tab', async () => {
   }).toBeGreaterThan(0);
   const initialCanvasWidth = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
 
+  await window.getByTestId('pdf-viewer-page-tone-menu').click();
+  await window.getByTestId('pdf-viewer-page-tone-soft').click();
+  await expect(firstPageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => { filter: string };
+        } | null;
+      };
+    }).ownerDocument;
+    return ownerDocument?.defaultView?.getComputedStyle(element).filter ?? 'none';
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).not.toBe('none');
+
+  await window.getByTestId('pdf-viewer-page-tone-menu').click();
+  await window.getByTestId('pdf-viewer-page-tone-original').click();
+  await expect(firstPageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'original');
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => { filter: string };
+        } | null;
+      };
+    }).ownerDocument;
+    return ownerDocument?.defaultView?.getComputedStyle(element).filter ?? 'none';
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe('none');
+
+  await window.getByTestId('pdf-viewer-page-tone-menu').click();
+  await window.getByTestId('pdf-viewer-page-tone-soft').click();
+  await expect(firstPageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+  await window.getByTestId(toWorkspaceTreeTestId('README.md')).click();
+  await waitForMonacoEditor(window);
+  const pdfTreeNode = window.getByTestId(toWorkspaceTreeTestId('docs/spec.pdf'));
+  if (!await pdfTreeNode.isVisible()) {
+    await window.getByTestId(toWorkspaceTreeTestId('docs')).click();
+  }
+  await expect(pdfTreeNode).toBeVisible();
+  await pdfTreeNode.click();
+  await expect(window.getByTestId('pdf-viewer-page-canvas-1')).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+
   await window.getByTestId('pdf-viewer-bookmark-bookmark-1').click();
   await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
     timeout: UI_READY_TIMEOUT_MS,

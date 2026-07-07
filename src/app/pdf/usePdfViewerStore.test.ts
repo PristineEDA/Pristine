@@ -12,6 +12,7 @@ const defaultSession = {
   zoom: PDF_VIEWER_DEFAULT_ZOOM,
   fitMode: 'custom',
   toolMode: 'select',
+  pageToneMode: 'auto',
   scrollTop: 0,
   scrollLeft: 0,
   searchQuery: '',
@@ -32,11 +33,13 @@ describe('usePdfViewerStore', () => {
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toEqual(defaultSession);
   });
 
-  it('stores page number, zoom, fit mode, tool mode, and scroll position per file', () => {
+  it('stores page number, zoom, fit mode, tool mode, page tone mode, and scroll position per file', () => {
     usePdfViewerStore.getState().setPageNumber('docs/spec.pdf', 3, 10);
     usePdfViewerStore.getState().setZoom('docs/spec.pdf', 1.5, 'width');
     usePdfViewerStore.getState().setToolMode('docs/spec.pdf', 'hand');
+    usePdfViewerStore.getState().setPageToneMode('docs/spec.pdf', 'soft');
     usePdfViewerStore.getState().setScrollPosition('docs/spec.pdf', { scrollTop: 240, scrollLeft: 18 });
+    usePdfViewerStore.getState().setPageToneMode('docs/other.pdf', 'original');
     usePdfViewerStore.getState().setPageNumber('docs/other.pdf', 2, 5);
 
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toEqual({
@@ -45,12 +48,14 @@ describe('usePdfViewerStore', () => {
       zoom: 1.5,
       fitMode: 'width',
       toolMode: 'hand',
+      pageToneMode: 'soft',
       scrollTop: 240,
       scrollLeft: 18,
     });
     expect(usePdfViewerStore.getState().getSession('docs/other.pdf')).toEqual({
       ...defaultSession,
       pageNumber: 2,
+      pageToneMode: 'original',
     });
   });
 

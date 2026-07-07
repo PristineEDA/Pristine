@@ -8,6 +8,7 @@ export const PDF_VIEWER_ZOOM_STEP = 0.25;
 
 export type PdfViewerFitMode = 'custom' | 'width' | 'page';
 export type PdfViewerToolMode = 'select' | 'hand';
+export type PdfViewerPageToneMode = 'auto' | 'original' | 'soft';
 
 export interface PdfHighlightRect {
   left: number;
@@ -36,6 +37,7 @@ export interface PdfViewerSession {
   zoom: number;
   fitMode: PdfViewerFitMode;
   toolMode: PdfViewerToolMode;
+  pageToneMode: PdfViewerPageToneMode;
   scrollTop: number;
   scrollLeft: number;
   searchQuery: string;
@@ -56,6 +58,7 @@ interface PdfViewerStoreState {
   setZoom: (fileId: string, zoom: number, fitMode?: PdfViewerFitMode) => void;
   setFitMode: (fileId: string, fitMode: PdfViewerFitMode) => void;
   setToolMode: (fileId: string, toolMode: PdfViewerToolMode) => void;
+  setPageToneMode: (fileId: string, mode: PdfViewerPageToneMode) => void;
   setSearchOpen: (fileId: string, isOpen: boolean) => void;
   setSearchQuery: (fileId: string, query: string) => void;
   setActiveSearchMatchIndex: (fileId: string, index: number, matchCount?: number) => void;
@@ -92,6 +95,10 @@ function normalizeFitMode(fitMode: PdfViewerFitMode): PdfViewerFitMode {
 
 function normalizeToolMode(toolMode: PdfViewerToolMode): PdfViewerToolMode {
   return toolMode === 'hand' ? 'hand' : 'select';
+}
+
+function normalizePageToneMode(mode: PdfViewerPageToneMode): PdfViewerPageToneMode {
+  return mode === 'original' || mode === 'soft' ? mode : 'auto';
 }
 
 function normalizeSearchQuery(query: string): string {
@@ -142,6 +149,7 @@ const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   zoom: PDF_VIEWER_DEFAULT_ZOOM,
   fitMode: 'custom',
   toolMode: 'select',
+  pageToneMode: 'auto',
   scrollTop: 0,
   scrollLeft: 0,
   searchQuery: '',
@@ -287,6 +295,29 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           [fileId]: {
             ...current,
             toolMode: nextToolMode,
+          },
+        },
+      };
+    });
+  },
+  setPageToneMode: (fileId, mode) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const nextMode = normalizePageToneMode(mode);
+      if (current.pageToneMode === nextMode) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            pageToneMode: nextMode,
           },
         },
       };

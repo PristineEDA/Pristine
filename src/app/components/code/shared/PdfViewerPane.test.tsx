@@ -179,6 +179,39 @@ describe('PdfViewerPane', () => {
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isThumbnailRailVisible).toBe(false);
   });
 
+  it('applies page tone mode to page and thumbnail canvases', async () => {
+    const pdfDocument = createMockPdfDocument(2);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 2'));
+
+    const pageCanvas = screen.getByTestId('pdf-viewer-page-canvas-1');
+    const thumbnailCanvas = screen.getByTestId('pdf-viewer-thumbnail-canvas-1');
+    expect(pageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'auto');
+    expect(pageCanvas).toHaveClass('dark:[filter:brightness(0.9)_contrast(0.96)]');
+    expect(thumbnailCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'auto');
+
+    fireEvent.pointerDown(screen.getByTestId('pdf-viewer-page-tone-menu'), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByTestId('pdf-viewer-page-tone-soft'));
+
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageToneMode).toBe('soft'));
+    expect(pageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+    expect(pageCanvas).toHaveStyle({ filter: 'brightness(0.9) contrast(0.96)' });
+    expect(thumbnailCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+    expect(thumbnailCanvas).toHaveStyle({ filter: 'brightness(0.9) contrast(0.96)' });
+
+    fireEvent.pointerDown(screen.getByTestId('pdf-viewer-page-tone-menu'), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByTestId('pdf-viewer-page-tone-original'));
+
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageToneMode).toBe('original'));
+    expect(pageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'original');
+    expect(pageCanvas).not.toHaveClass('dark:[filter:brightness(0.9)_contrast(0.96)]');
+    expect(pageCanvas).not.toHaveStyle({ filter: 'brightness(0.9) contrast(0.96)' });
+    expect(thumbnailCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'original');
+  });
+
   it('creates local highlight overlays from the current text selection', async () => {
     const pdfDocument = createMockPdfDocument(1, {
       1: ['Selectable annotation text'],
