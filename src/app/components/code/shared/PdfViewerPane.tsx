@@ -849,7 +849,7 @@ function PdfBookmarkTree({
     return (
       <li key={bookmark.id}>
         <div
-          className="flex min-w-0 items-center gap-1 rounded px-1 py-1 text-[12px] text-ide-text-muted hover:bg-ide-hover hover:text-ide-text"
+          className="flex min-w-0 items-center gap-1 rounded px-1 py-1 text-[11px] text-ide-text-muted hover:bg-ide-hover hover:text-ide-text"
           style={{ paddingLeft: 4 + depth * 12 }}
         >
           <button
@@ -866,7 +866,7 @@ function PdfBookmarkTree({
             data-testid={`pdf-viewer-bookmark-${bookmark.id}`}
             title={bookmark.title}
             onClick={() => onOpenBookmark(bookmark)}
-            className="min-w-0 flex-1 truncate text-left font-normal"
+            className="min-w-0 flex-1 truncate text-left text-[11px] font-normal"
           >
             {bookmark.title}
           </button>
@@ -886,12 +886,12 @@ function PdfBookmarkTree({
       className="w-56 shrink-0 overflow-y-auto border-r border-ide-border bg-ide-tab-bg/80 px-2 py-2"
       aria-label="PDF bookmarks"
     >
-      <div className="mb-2 flex items-center gap-2 px-1 text-[11px] font-normal uppercase tracking-wide text-ide-text-muted">
+      <div className="mb-2 flex items-center gap-2 px-1 text-[11px] font-normal text-ide-text-muted">
         <BookOpen size={13} />
         Bookmarks
       </div>
       {bookmarks.length === 0 ? (
-        <div data-testid="pdf-viewer-bookmark-empty" className="px-1 py-6 text-center text-[12px] text-ide-text-muted">
+        <div data-testid="pdf-viewer-bookmark-empty" className="px-1 py-6 text-center text-[11px] text-ide-text-muted">
           No bookmarks
         </div>
       ) : (
@@ -1620,7 +1620,7 @@ export function PdfViewerPane({
                 data-testid="pdf-viewer-page-tone-menu"
                 disabled={isLoading || !pdfDocument}
                 className={[
-                  'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                  'rounded p-1 ![box-shadow:none] outline-none transition-colors hover:bg-ide-hover focus:![box-shadow:none] focus:outline-none focus:ring-0 focus-visible:![box-shadow:none] focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-default disabled:opacity-40',
                   pageToneMode === 'auto' ? 'text-ide-text-muted hover:text-ide-text' : 'bg-ide-hover text-ide-text',
                 ].join(' ')}
               >
@@ -1629,7 +1629,8 @@ export function PdfViewerPane({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="border-ide-border bg-ide-panel text-ide-text"
+              data-testid="pdf-viewer-page-tone-menu-content"
+              className="border-ide-border bg-ide-tab-bg text-ide-text shadow-lg"
             >
               {PDF_VIEWER_PAGE_TONE_OPTIONS.map((option) => (
                 <DropdownMenuItem

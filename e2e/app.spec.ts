@@ -4760,8 +4760,37 @@ test('file tree opens PDF files in the center editor tab', async () => {
   const secondPageCanvas = window.getByTestId('pdf-viewer-page-canvas-2');
   await expect(viewport).toBeVisible();
   await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toBeVisible();
+  await expect(window.getByText('Bookmarks')).toBeVisible();
   await expect(window.getByTestId('pdf-viewer-bookmark-bookmark-0')).toContainText('Page 1');
   await expect(window.getByTestId('pdf-viewer-bookmark-bookmark-1')).toContainText('Page 2');
+  await expect.poll(async () => {
+    const bookmarkHeader = window.getByText('Bookmarks');
+    const bookmarkItem = window.getByTestId('pdf-viewer-bookmark-bookmark-0');
+    return Promise.all([
+      bookmarkHeader.evaluate((element) => {
+        const ownerDocument = (element as unknown as {
+          ownerDocument?: {
+            defaultView?: {
+              getComputedStyle: (target: unknown) => { fontSize: string };
+            } | null;
+          };
+        }).ownerDocument;
+        return ownerDocument?.defaultView?.getComputedStyle(element).fontSize ?? '';
+      }),
+      bookmarkItem.evaluate((element) => {
+        const ownerDocument = (element as unknown as {
+          ownerDocument?: {
+            defaultView?: {
+              getComputedStyle: (target: unknown) => { fontSize: string };
+            } | null;
+          };
+        }).ownerDocument;
+        return ownerDocument?.defaultView?.getComputedStyle(element).fontSize ?? '';
+      }),
+    ]);
+  }, {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toEqual(['11px', '11px']);
   await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
   await expect(window.getByTestId('pdf-viewer-thumbnail-1')).toHaveAttribute('aria-current', 'page');
   await expect(firstPageCanvas).toBeVisible();
@@ -4773,7 +4802,47 @@ test('file tree opens PDF files in the center editor tab', async () => {
   }).toBeGreaterThan(0);
   const initialCanvasWidth = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
 
+  const pageToneMenu = window.getByTestId('pdf-viewer-page-tone-menu');
+  await pageToneMenu.focus();
+  await window.keyboard.down('Shift');
+  await expect.poll(async () => pageToneMenu.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => {
+            boxShadow: string;
+            outlineStyle: string;
+            outlineWidth: string;
+          };
+        } | null;
+      };
+    }).ownerDocument;
+    const styles = ownerDocument?.defaultView?.getComputedStyle(element);
+    return {
+      boxShadow: styles?.boxShadow ?? '',
+      outlineStyle: styles?.outlineStyle ?? '',
+      outlineWidth: styles?.outlineWidth ?? '',
+    };
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toEqual({ boxShadow: 'none', outlineStyle: 'none', outlineWidth: '0px' });
+  await window.keyboard.up('Shift');
+
   await window.getByTestId('pdf-viewer-page-tone-menu').click();
+  const pageToneMenuContent = window.getByTestId('pdf-viewer-page-tone-menu-content');
+  await expect(pageToneMenuContent).toBeVisible();
+  await expect.poll(async () => pageToneMenuContent.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => { backgroundColor: string };
+        } | null;
+      };
+    }).ownerDocument;
+    return ownerDocument?.defaultView?.getComputedStyle(element).backgroundColor ?? 'rgba(0, 0, 0, 0)';
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).not.toBe('rgba(0, 0, 0, 0)');
   await window.getByTestId('pdf-viewer-page-tone-soft').click();
   await expect(firstPageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
   await expect.poll(async () => firstPageCanvas.evaluate((element) => {

@@ -144,8 +144,13 @@ describe('PdfViewerPane', () => {
     const bookmark = await screen.findByTestId('pdf-viewer-bookmark-bookmark-0');
     expect(screen.getByTestId('pdf-viewer-bookmark-tree')).toBeInTheDocument();
     expect(screen.getByText('Bookmarks')).toHaveClass('font-normal');
+    expect(screen.getByText('Bookmarks')).toHaveClass('text-[11px]');
+    expect(screen.getByText('Bookmarks')).not.toHaveClass('uppercase');
+    expect(screen.getByText('Bookmarks')).not.toHaveClass('tracking-wide');
     expect(screen.getByText('Bookmarks')).not.toHaveClass('font-semibold');
     expect(bookmark).toHaveClass('font-normal');
+    expect(bookmark).toHaveClass('text-[11px]');
+    expect(bookmark.closest('div')).toHaveClass('text-[11px]');
 
     fireEvent.click(bookmark);
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 2'));
@@ -193,7 +198,18 @@ describe('PdfViewerPane', () => {
     expect(pageCanvas).toHaveClass('dark:[filter:brightness(0.9)_contrast(0.96)]');
     expect(thumbnailCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'auto');
 
-    fireEvent.pointerDown(screen.getByTestId('pdf-viewer-page-tone-menu'), { button: 0, ctrlKey: false });
+    const pageToneMenu = screen.getByTestId('pdf-viewer-page-tone-menu');
+    expect(pageToneMenu).toHaveClass('outline-none');
+    expect(pageToneMenu).toHaveClass('focus:outline-none');
+    expect(pageToneMenu).toHaveClass('focus:ring-0');
+    expect(pageToneMenu).toHaveClass('focus-visible:outline-none');
+    expect(pageToneMenu).toHaveClass('focus-visible:ring-0');
+    expect(pageToneMenu).toHaveClass('focus-visible:ring-offset-0');
+    expect(pageToneMenu).toHaveClass('focus-visible:![box-shadow:none]');
+
+    fireEvent.pointerDown(pageToneMenu, { button: 0, ctrlKey: false });
+    expect(await screen.findByTestId('pdf-viewer-page-tone-menu-content')).toHaveClass('bg-ide-tab-bg');
+    expect(screen.getByTestId('pdf-viewer-page-tone-menu-content')).not.toHaveClass('bg-ide-panel');
     fireEvent.click(await screen.findByTestId('pdf-viewer-page-tone-soft'));
 
     await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageToneMode).toBe('soft'));
