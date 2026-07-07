@@ -29,6 +29,7 @@ describe('resolveWorkspaceFileIcon', () => {
     expect(resolveWorkspaceFileIcon('component.test.tsx').key).toBe('test-jsx');
     expect(resolveWorkspaceFileIcon('vite-env.d.ts').key).toBe('typescript-def');
     expect(resolveWorkspaceFileIcon('diagram.svg').key).toBe('svg');
+    expect(resolveWorkspaceFileIcon('docs/user-guide.pdf').key).toBe('pdf');
     expect(resolveWorkspaceFileIcon('unknown.txt').key).toBe('document');
   });
 

@@ -32,6 +32,7 @@ const directRuntimeDependencyAttributionIds = new Map([
   ['mermaid', 'mermaid'],
   ['monaco-editor', 'monaco-editor'],
   ['node-pty', 'node-pty'],
+  ['pdfjs-dist', 'pdfjs-dist'],
   ['pixi.js', 'pixi-js'],
   ['radix-ui', 'radix-ui'],
   ['react', 'react'],

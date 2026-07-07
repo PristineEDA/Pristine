@@ -102,6 +102,8 @@ export function createElectronApiMock(): ElectronAPI {
     fs: {
       readFile: vi.fn().mockResolvedValue(''),
       readFileAbsolute: vi.fn().mockResolvedValue(''),
+      readFileBinary: vi.fn().mockResolvedValue(new Uint8Array()),
+      readFileBinaryAbsolute: vi.fn().mockResolvedValue(new Uint8Array()),
       listFiles: vi.fn().mockResolvedValue([]),
       writeFile: vi.fn(),
       writeFileAbsolute: vi.fn(),

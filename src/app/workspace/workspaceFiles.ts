@@ -150,6 +150,10 @@ export function isWorkspaceRelativeFilePath(filePath: string): boolean {
   return !isUntitledFileId(filePath) && !isAbsoluteFilePath(filePath);
 }
 
+export function isPdfWorkspaceFile(filePath: string): boolean {
+  return normalizeWorkspacePath(filePath).toLowerCase().endsWith('.pdf');
+}
+
 export function getWorkspaceSegments(filePath: string, rootName = DEFAULT_WORKSPACE_ROOT_NAME): string[] {
   const normalized = normalizeWorkspacePath(filePath);
 
@@ -234,6 +238,10 @@ export function getEditorLanguage(filePath: string): string {
     return 'markdown';
   }
 
+  if (lowerCased.endsWith('.pdf')) {
+    return 'pdf';
+  }
+
   if (lowerCased.endsWith('.c') || lowerCased.endsWith('.h')) {
     return 'c';
   }
@@ -316,6 +324,10 @@ export function getEditorLanguageLabel(filePath: string): string {
 
   if (language === 'markdown') {
     return 'Markdown';
+  }
+
+  if (language === 'pdf') {
+    return 'PDF';
   }
 
   if (language === 'json') {

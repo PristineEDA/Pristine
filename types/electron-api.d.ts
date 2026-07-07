@@ -100,6 +100,8 @@ export interface ElectronAPI {
   fs: {
     readFile: (filePath: string, encoding?: string) => Promise<string>;
     readFileAbsolute: (filePath: string, encoding?: string) => Promise<string>;
+    readFileBinary: (filePath: string) => Promise<Uint8Array>;
+    readFileBinaryAbsolute: (filePath: string) => Promise<Uint8Array>;
     listFiles: (dirPath?: string) => Promise<string[]>;
     writeFile: (filePath: string, content: string) => Promise<void>;
     writeFileAbsolute: (filePath: string, content: string) => Promise<void>;

@@ -117,6 +117,20 @@ export function registerFilesystemHandlers(): void {
     return fs.readFile(resolved, { encoding: enc });
   });
 
+  ipcMain.handle(AsyncChannels.FS_READ_FILE_BINARY, async (_event, filePath: unknown) => {
+    assertString(filePath, 'filePath');
+    const resolved = validatePathWithinRoot(getRoot(), filePath);
+    const contents = await fs.readFile(resolved);
+    return new Uint8Array(contents);
+  });
+
+  ipcMain.handle(AsyncChannels.FS_READ_FILE_BINARY_ABSOLUTE, async (_event, filePath: unknown) => {
+    assertString(filePath, 'filePath');
+    const resolved = validateAbsolutePath(filePath);
+    const contents = await fs.readFile(resolved);
+    return new Uint8Array(contents);
+  });
+
   ipcMain.handle(AsyncChannels.FS_LIST_FILES, async (_event, dirPath: unknown = '.') => {
     assertString(dirPath, 'dirPath');
     if (!projectRoot) {

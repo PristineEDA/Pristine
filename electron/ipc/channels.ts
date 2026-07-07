@@ -42,6 +42,8 @@ export const AsyncChannels = {
   PROJECT_UPDATE_CONFIG: 'async:project:update-config',
   FS_READ_FILE: 'async:fs:read-file',
   FS_READ_FILE_ABSOLUTE: 'async:fs:read-file-absolute',
+  FS_READ_FILE_BINARY: 'async:fs:read-file-binary',
+  FS_READ_FILE_BINARY_ABSOLUTE: 'async:fs:read-file-binary-absolute',
   FS_LIST_FILES: 'async:fs:list-files',
   FS_WRITE_FILE: 'async:fs:write-file',
   FS_WRITE_FILE_ABSOLUTE: 'async:fs:write-file-absolute',

@@ -793,6 +793,42 @@ function createWorkspaceCopyWithFiles(targetName: string, files: Record<string, 
   return targetPath;
 }
 
+function createE2EPdfBuffer() {
+  const parts: string[] = ['%PDF-1.4\n'];
+  const offsets: number[] = [];
+
+  const addObject = (objectId: number, body: string) => {
+    offsets[objectId] = Buffer.byteLength(parts.join(''), 'ascii');
+    parts.push(`${objectId} 0 obj\n${body}\nendobj\n`);
+  };
+
+  const pageOneStream = 'BT /F1 18 Tf 36 120 Td (Pristine PDF E2E page 1) Tj ET';
+  const pageTwoStream = 'BT /F1 18 Tf 36 120 Td (Pristine PDF E2E page 2) Tj ET';
+
+  addObject(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  addObject(2, '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>');
+  addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 240 180] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>');
+  addObject(4, `<< /Length ${Buffer.byteLength(pageOneStream, 'ascii')} >>\nstream\n${pageOneStream}\nendstream`);
+  addObject(5, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 240 180] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>');
+  addObject(6, `<< /Length ${Buffer.byteLength(pageTwoStream, 'ascii')} >>\nstream\n${pageTwoStream}\nendstream`);
+  addObject(7, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+  const xrefOffset = Buffer.byteLength(parts.join(''), 'ascii');
+  parts.push('xref\n');
+  parts.push('0 8\n');
+  parts.push('0000000000 65535 f \n');
+  for (let objectId = 1; objectId <= 7; objectId += 1) {
+    parts.push(`${String(offsets[objectId]).padStart(10, '0')} 00000 n \n`);
+  }
+  parts.push('trailer\n');
+  parts.push('<< /Size 8 /Root 1 0 R >>\n');
+  parts.push('startxref\n');
+  parts.push(`${xrefOffset}\n`);
+  parts.push('%%EOF\n');
+
+  return Buffer.from(parts.join(''), 'ascii');
+}
+
 function initializeGitWorkspaceCopy(targetPath: string, branchName: string) {
   const gitIgnorePath = path.join(targetPath, '.gitignore');
   const existingGitIgnore = fs.existsSync(gitIgnorePath)
@@ -4667,6 +4703,42 @@ test('explorer opens a file into a new editor tab', async () => {
   await expect(window.locator('.monaco-editor .view-lines')).toContainText('Fixture Workspace', {
     timeout: MONACO_READY_TIMEOUT_MS,
   });
+
+  await app.close();
+});
+
+test('file tree opens PDF files in the center editor tab', async () => {
+  const projectRoot = createWorkspaceCopyWithFiles('pdf-viewer-project', {
+    'docs/spec.pdf': createE2EPdfBuffer(),
+  });
+  const { app, window } = await launchApp({ projectRoot });
+
+  await ensureExplorerVisible(window);
+  await openNestedWorkspaceFile(window, [
+    toWorkspaceTreeTestId('docs'),
+    toWorkspaceTreeTestId('docs/spec.pdf'),
+  ]);
+
+  await expect(window.getByTestId('editor-tab-docs/spec.pdf')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-pane')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.locator('.monaco-editor')).toHaveCount(0);
+
+  const canvas = window.getByTestId('pdf-viewer-canvas');
+  await expect.poll(async () => canvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(0);
+  const initialCanvasWidth = await canvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
+
+  await window.getByTestId('pdf-viewer-next-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2');
+
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await expect.poll(async () => canvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(initialCanvasWidth);
 
   await app.close();
 });

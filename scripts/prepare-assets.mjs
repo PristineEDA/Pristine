@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs'
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { access, copyFile, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -14,6 +14,7 @@ const wallpaperTargetPath = path.join(generatedDir, 'empty-wallpaper.png')
 const generatedFontsDir = path.join(generatedDir, 'fonts')
 const generatedLogoDir = path.join(generatedDir, 'logo')
 const generatedSplashDir = path.join(generatedDir, 'splash')
+const generatedPdfJsDir = path.join(generatedDir, 'pdfjs')
 const splashBackgroundFileName = 'greek-lighthouse-masked-santorini-hillside-village-strict.png'
 const splashBackgroundTargetPath = path.join(generatedSplashDir, 'splash-background.png')
 const buildResourcesDir = path.join(workspaceRoot, 'build')
@@ -38,6 +39,7 @@ const localSplashBackgroundSourcePath = path.join(
   'official',
   splashBackgroundFileName,
 )
+const pdfJsPackageRoot = path.join(workspaceRoot, 'node_modules', 'pdfjs-dist')
 
 const logoPngFiles = [
   'logo.png',
@@ -449,12 +451,33 @@ async function prepareSplashBackground() {
   await downloadRemoteSplashBackground()
 }
 
+async function copyPdfJsAssetDirectory(sourceDirName) {
+  const sourceDir = path.join(pdfJsPackageRoot, sourceDirName)
+  const targetDir = path.join(generatedPdfJsDir, sourceDirName)
+
+  if (!(await exists(sourceDir))) {
+    throw new Error(`Missing pdfjs-dist asset directory: ${path.relative(workspaceRoot, sourceDir)}`)
+  }
+
+  await rm(targetDir, { recursive: true, force: true })
+  await ensureDirectory(path.dirname(targetDir))
+  await cp(sourceDir, targetDir, { recursive: true })
+  console.log(`Prepared PDF.js ${sourceDirName}: ${path.relative(workspaceRoot, targetDir)}`)
+}
+
+async function preparePdfJsAssets() {
+  await ensureDirectory(generatedPdfJsDir)
+  await copyPdfJsAssetDirectory('cmaps')
+  await copyPdfJsAssetDirectory('standard_fonts')
+}
+
 async function main() {
   await ensureDirectory(generatedDir)
   await prepareFontAssets()
   await prepareLogoAssets()
   await prepareEmptyWallpaper()
   await prepareSplashBackground()
+  await preparePdfJsAssets()
 }
 
 main().catch((error) => {

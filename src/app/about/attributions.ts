@@ -67,6 +67,13 @@ export const openSourceAttributionSections: AttributionSection[] = [
         license: 'MIT',
       },
       {
+        id: 'pdfjs-dist',
+        name: 'PDF.js',
+        url: 'https://github.com/mozilla/pdf.js',
+        author: 'Mozilla',
+        license: 'Apache-2.0',
+      },
+      {
         id: 'blocksuite-affine',
         name: '@blocksuite/affine',
         url: 'https://github.com/toeverything/AFFiNE/tree/v0.26.3/blocksuite',

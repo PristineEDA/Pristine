@@ -41,6 +41,7 @@ import {
   createWorkspaceCopyName,
   getPathBaseName,
   getWorkspaceParentPath,
+  isPdfWorkspaceFile,
   isWithinWorkspacePath,
   isWorkspaceRelativeFilePath,
   joinWorkspacePath,
@@ -1165,6 +1166,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const loadFileContent = useCallback((fileId: string) => {
     const resolvedFileId = resolveCurrentFileId(fileId);
+
+    if (isPdfWorkspaceFile(resolvedFileId)) {
+      return;
+    }
 
     if (untitledFilesRef.current[resolvedFileId]) {
       if (fileStoreRef.current.fileContents[resolvedFileId] === undefined) {

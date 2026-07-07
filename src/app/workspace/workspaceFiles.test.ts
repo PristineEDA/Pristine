@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getEditorLanguage, getEditorLanguageLabel } from './workspaceFiles';
+import { getEditorLanguage, getEditorLanguageLabel, isPdfWorkspaceFile } from './workspaceFiles';
 
 describe('workspaceFiles language helpers', () => {
   it('routes Makefile and .mk files to the makefile editor language', () => {
@@ -42,5 +42,13 @@ describe('workspaceFiles language helpers', () => {
     expect(getEditorLanguageLabel('sim/files.fl')).toBe('File List');
     expect(getEditorLanguageLabel('constraints/top.xdc')).toBe('XDC');
     expect(getEditorLanguageLabel('constraints/top.sdc')).toBe('SDC');
+  });
+
+  it('routes PDF files to the PDF viewer language and label', () => {
+    expect(isPdfWorkspaceFile('docs/user-guide.pdf')).toBe(true);
+    expect(isPdfWorkspaceFile('docs/user-guide.PDF')).toBe(true);
+    expect(isPdfWorkspaceFile('docs/user-guide.pdf.bak')).toBe(false);
+    expect(getEditorLanguage('docs/user-guide.pdf')).toBe('pdf');
+    expect(getEditorLanguageLabel('docs/user-guide.pdf')).toBe('PDF');
   });
 });

@@ -338,4 +338,13 @@ describe('release workflow contract', () => {
     expect(prepareAssetsScript).toContain("'official',")
     expect(prepareAssetsScript).toContain('https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/splash/official')
   })
+
+  it('prepares PDF.js auxiliary assets for packaged PDF viewing', () => {
+    const prepareAssetsScript = fs.readFileSync(prepareAssetsScriptPath, 'utf8')
+
+    expect(prepareAssetsScript).toContain("path.join(generatedDir, 'pdfjs')")
+    expect(prepareAssetsScript).toContain("path.join(workspaceRoot, 'node_modules', 'pdfjs-dist')")
+    expect(prepareAssetsScript).toContain("copyPdfJsAssetDirectory('cmaps')")
+    expect(prepareAssetsScript).toContain("copyPdfJsAssetDirectory('standard_fonts')")
+  })
 })
