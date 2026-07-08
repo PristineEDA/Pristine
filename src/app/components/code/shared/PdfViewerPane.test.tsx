@@ -82,6 +82,43 @@ function setElementSize(element: HTMLElement, width: number, height: number) {
   });
 }
 
+function createRect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left,
+    right: left + width,
+    top,
+    width,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function mockPdfSelection({
+  isCollapsed = false,
+  rects,
+  text = 'Selectable annotation text',
+}: {
+  isCollapsed?: boolean;
+  rects: DOMRect[];
+  text?: string;
+}) {
+  const removeAllRanges = vi.fn();
+  const selection = {
+    isCollapsed,
+    rangeCount: 1,
+    toString: () => text,
+    getRangeAt: () => ({
+      getClientRects: () => rects,
+    }),
+    removeAllRanges,
+  };
+  vi.spyOn(window, 'getSelection').mockReturnValue(selection as unknown as Selection);
+  return { removeAllRanges, selection };
+}
+
 describe('PdfViewerPane', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -240,44 +277,142 @@ describe('PdfViewerPane', () => {
     const pageContent = screen.getByTestId('pdf-viewer-page-1')
       .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
     expect(pageContent).not.toBeNull();
-    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue({
-      bottom: 820,
-      height: 800,
-      left: 10,
-      right: 610,
-      top: 20,
-      width: 600,
-      x: 10,
-      y: 20,
-      toJSON: () => ({}),
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    const { removeAllRanges } = mockPdfSelection({
+      rects: [createRect(50, 50, 160, 16)],
     });
-    const removeAllRanges = vi.fn();
-    const selection = {
-      isCollapsed: false,
-      rangeCount: 1,
-      toString: () => 'Selectable annotation text',
-      getRangeAt: () => ({
-        getClientRects: () => [{
-          bottom: 66,
-          height: 16,
-          left: 50,
-          right: 210,
-          top: 50,
-          width: 160,
-          x: 50,
-          y: 50,
-          toJSON: () => ({}),
-        }],
-      }),
-      removeAllRanges,
-    };
-    vi.spyOn(window, 'getSelection').mockReturnValue(selection as unknown as Selection);
 
     fireEvent.click(screen.getByTestId('pdf-viewer-highlight-selection'));
 
     expect(await screen.findByTestId('pdf-viewer-highlight')).toBeInTheDocument();
     expect(removeAllRanges).toHaveBeenCalled();
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toHaveLength(1);
+  });
+
+  it('shows a floating selection toolbar and highlights the selected text', async () => {
+    const pdfDocument = createMockPdfDocument(1, {
+      1: ['Selectable annotation text'],
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    vi.spyOn(screen.getByTestId('pdf-viewer-pane'), 'getBoundingClientRect').mockReturnValue(createRect(0, 0, 800, 600));
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    const { removeAllRanges } = mockPdfSelection({
+      rects: [createRect(50, 50, 160, 16)],
+    });
+
+    document.dispatchEvent(new Event('selectionchange'));
+    expect(screen.queryByTestId('pdf-viewer-selection-toolbar')).not.toBeInTheDocument();
+
+    fireEvent.mouseUp(screen.getByTestId('pdf-viewer-scroll-viewport'));
+    const toolbar = await screen.findByTestId('pdf-viewer-selection-toolbar');
+    expect(toolbar).toHaveStyle({ left: '130px', top: '73px' });
+    expect(toolbar).not.toHaveStyle({ width: '344px' });
+    expect(toolbar).toHaveClass('inline-flex');
+    expect(toolbar).toHaveClass('w-auto');
+    expect(toolbar).toHaveClass('px-1.5');
+    expect(toolbar).toHaveClass('py-1.5');
+    expect(toolbar).toHaveClass('gap-0.5');
+    expect(screen.getByLabelText('note')).toHaveClass('text-ide-text-muted');
+    expect(screen.getByLabelText('note')).toHaveClass('opacity-70');
+    expect(screen.getByTestId('pdf-viewer-selection-highlight')).toHaveClass('text-ide-text');
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-selection-highlight'));
+
+    expect(await screen.findByTestId('pdf-viewer-highlight')).toBeInTheDocument();
+    expect(removeAllRanges).toHaveBeenCalled();
+    expect(screen.queryByTestId('pdf-viewer-selection-toolbar')).not.toBeInTheDocument();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toHaveLength(1);
+  });
+
+  it('shows the selection toolbar after keyboard selection updates', async () => {
+    const pdfDocument = createMockPdfDocument(1, {
+      1: ['Keyboard annotation text'],
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    vi.spyOn(screen.getByTestId('pdf-viewer-pane'), 'getBoundingClientRect').mockReturnValue(createRect(0, 0, 800, 600));
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    mockPdfSelection({
+      rects: [createRect(60, 80, 180, 16)],
+      text: 'Keyboard annotation text',
+    });
+
+    fireEvent.keyUp(screen.getByTestId('pdf-viewer-scroll-viewport'), { key: 'ArrowRight', shiftKey: true });
+
+    expect(await screen.findByTestId('pdf-viewer-selection-toolbar')).toBeInTheDocument();
+  });
+
+  it('does not show the selection toolbar for hand mode or invalid selections', async () => {
+    const pdfDocument = createMockPdfDocument(2, {
+      1: ['Selectable annotation text'],
+      2: ['Second page selection text'],
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    await screen.findByTestId('pdf-viewer-text-layer-2');
+    vi.spyOn(screen.getByTestId('pdf-viewer-pane'), 'getBoundingClientRect').mockReturnValue(createRect(0, 0, 800, 600));
+    const pageOneContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    const pageTwoContent = screen.getByTestId('pdf-viewer-page-2')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageOneContent).not.toBeNull();
+    expect(pageTwoContent).not.toBeNull();
+    vi.spyOn(pageOneContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    vi.spyOn(pageTwoContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 850, 600, 800));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-hand-tool'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-hand-tool')).toHaveAttribute('aria-pressed', 'true'));
+    mockPdfSelection({ rects: [createRect(50, 50, 160, 16)] });
+    document.dispatchEvent(new Event('selectionchange'));
+    fireEvent.mouseUp(screen.getByTestId('pdf-viewer-scroll-viewport'));
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-selection-toolbar')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-select-tool'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-select-tool')).toHaveAttribute('aria-pressed', 'true'));
+    vi.spyOn(pageOneContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    vi.spyOn(pageTwoContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 850, 600, 800));
+    vi.spyOn(screen.getByTestId('pdf-viewer-pane'), 'getBoundingClientRect').mockReturnValue(createRect(0, 0, 800, 600));
+    mockPdfSelection({ isCollapsed: true, rects: [createRect(50, 50, 160, 16)] });
+    document.dispatchEvent(new Event('selectionchange'));
+    fireEvent.mouseUp(screen.getByTestId('pdf-viewer-scroll-viewport'));
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-selection-toolbar')).not.toBeInTheDocument());
+
+    vi.spyOn(pageOneContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    vi.spyOn(pageTwoContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 850, 600, 800));
+    vi.spyOn(screen.getByTestId('pdf-viewer-pane'), 'getBoundingClientRect').mockReturnValue(createRect(0, 0, 800, 600));
+    mockPdfSelection({ rects: [createRect(700, 50, 160, 16)] });
+    document.dispatchEvent(new Event('selectionchange'));
+    fireEvent.mouseUp(screen.getByTestId('pdf-viewer-scroll-viewport'));
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-selection-toolbar')).not.toBeInTheDocument());
+
+    vi.spyOn(pageOneContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    vi.spyOn(pageTwoContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 850, 600, 800));
+    vi.spyOn(screen.getByTestId('pdf-viewer-pane'), 'getBoundingClientRect').mockReturnValue(createRect(0, 0, 800, 600));
+    mockPdfSelection({
+      rects: [
+        createRect(50, 50, 160, 16),
+        createRect(50, 880, 160, 16),
+      ],
+    });
+    document.dispatchEvent(new Event('selectionchange'));
+    fireEvent.mouseUp(screen.getByTestId('pdf-viewer-scroll-viewport'));
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-selection-toolbar')).not.toBeInTheDocument());
   });
 
   it('supports page navigation, thumbnail navigation, and zoom controls', async () => {

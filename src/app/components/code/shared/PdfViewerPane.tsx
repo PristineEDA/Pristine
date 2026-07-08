@@ -6,7 +6,9 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
+  type RefObject,
   type UIEvent,
   type WheelEvent,
 } from 'react';
@@ -19,12 +21,18 @@ import {
   Hand,
   Highlighter,
   Maximize2,
+  MessageSquarePlus,
   MoveHorizontal,
   MousePointer2,
+  NotebookPen,
   PanelLeft,
   PanelRight,
+  PanelTop,
   RotateCcw,
+  ScanText,
   Search,
+  TextCursorInput,
+  Type,
   X,
   ZoomIn,
   ZoomOut,
@@ -64,6 +72,8 @@ const PDF_VIEWER_THUMBNAIL_WIDTH_PX = 78;
 const PDF_VIEWER_THUMBNAIL_OVERSCAN = 4;
 const PDF_VIEWER_SOFT_PAGE_FILTER = 'brightness(0.9) contrast(0.96)';
 const PDF_VIEWER_AUTO_PAGE_FILTER_CLASS = 'dark:[filter:brightness(0.9)_contrast(0.96)]';
+const PDF_SELECTION_TOOLBAR_HEIGHT_PX = 38;
+const PDF_SELECTION_TOOLBAR_GAP_PX = 7;
 
 const PDF_VIEWER_PAGE_TONE_OPTIONS: Array<{ value: PdfViewerPageToneMode; label: string }> = [
   { value: 'auto', label: 'Auto' },
@@ -115,6 +125,32 @@ interface PdfBookmark {
   dest: unknown;
   url: string | null;
   children: PdfBookmark[];
+}
+
+interface PdfClientRectBounds {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+interface PdfSelectionPageMatch {
+  pageNumber: number;
+  rects: PdfHighlightRect[];
+}
+
+interface PdfSelectionInfo {
+  selection: Selection;
+  quote: string;
+  bounds: PdfClientRectBounds;
+  pageMatches: PdfSelectionPageMatch[];
+}
+
+interface PdfSelectionToolbarState {
+  left: number;
+  top: number;
 }
 
 interface PdfPageCanvasProps {
@@ -260,6 +296,101 @@ function setViewportScroll(viewport: HTMLElement, scrollLeft: number, scrollTop:
 
   viewport.scrollLeft = Math.max(0, scrollLeft);
   viewport.scrollTop = Math.max(0, scrollTop);
+}
+
+function getBoundsFromClientRects(rects: DOMRect[]): PdfClientRectBounds | null {
+  if (rects.length === 0) {
+    return null;
+  }
+
+  const bounds = rects.reduce<PdfClientRectBounds>((current, rect) => ({
+    left: Math.min(current.left, rect.left),
+    right: Math.max(current.right, rect.right),
+    top: Math.min(current.top, rect.top),
+    bottom: Math.max(current.bottom, rect.bottom),
+    width: 0,
+    height: 0,
+  }), {
+    left: Number.POSITIVE_INFINITY,
+    right: Number.NEGATIVE_INFINITY,
+    top: Number.POSITIVE_INFINITY,
+    bottom: Number.NEGATIVE_INFINITY,
+    width: 0,
+    height: 0,
+  });
+
+  bounds.width = bounds.right - bounds.left;
+  bounds.height = bounds.bottom - bounds.top;
+  return bounds.width > 0 && bounds.height > 0 ? bounds : null;
+}
+
+function getPdfSelectionInfo(
+  viewport: HTMLElement | null,
+  zoom: number,
+  options: { requireSinglePage?: boolean } = {},
+): PdfSelectionInfo | null {
+  const selection = window.getSelection();
+  if (!viewport || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return null;
+  }
+
+  const quote = selection.toString().trim();
+  if (!quote) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  const clientRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+  const bounds = getBoundsFromClientRects(clientRects);
+  if (!bounds) {
+    return null;
+  }
+
+  const pageMatches: PdfSelectionPageMatch[] = [];
+  const pageElements = Array.from(viewport.querySelectorAll<HTMLElement>('[data-pdf-page-content="true"]'));
+  for (const pageElement of pageElements) {
+    const pageNumberValue = Number(pageElement.dataset['pdfPageNumber']);
+    if (!Number.isFinite(pageNumberValue)) {
+      continue;
+    }
+
+    const pageRect = pageElement.getBoundingClientRect();
+    const rects: PdfHighlightRect[] = [];
+    for (const rect of clientRects) {
+      const left = Math.max(rect.left, pageRect.left);
+      const right = Math.min(rect.right, pageRect.right);
+      const top = Math.max(rect.top, pageRect.top);
+      const bottom = Math.min(rect.bottom, pageRect.bottom);
+      if (right <= left || bottom <= top) {
+        continue;
+      }
+
+      rects.push({
+        left: (left - pageRect.left) / zoom,
+        top: (top - pageRect.top) / zoom,
+        width: (right - left) / zoom,
+        height: (bottom - top) / zoom,
+      });
+    }
+
+    if (rects.length > 0) {
+      pageMatches.push({
+        pageNumber: pageNumberValue,
+        rects,
+      });
+    }
+  }
+
+  if (pageMatches.length === 0 || (options.requireSinglePage && pageMatches.length !== 1)) {
+    return null;
+  }
+
+  return {
+    selection,
+    quote,
+    bounds,
+    pageMatches,
+  };
 }
 
 function normalizeTransform(value: unknown, fallback: PdfTransform): PdfTransform {
@@ -550,6 +681,7 @@ function PdfPageTextLayer({
   return (
     <div
       data-testid={`pdf-viewer-text-layer-${pageNumber}`}
+      data-pdf-text-layer="true"
       className={[
         'absolute inset-0 z-[2] overflow-hidden',
         toolMode === 'hand' ? 'pointer-events-none select-none' : 'select-text',
@@ -903,16 +1035,81 @@ function PdfBookmarkTree({
   );
 }
 
+interface PdfSelectionToolbarProps {
+  state: PdfSelectionToolbarState;
+  onHighlight: () => void;
+  toolbarRef: RefObject<HTMLDivElement | null>;
+}
+
+function PdfSelectionToolbar({ state, onHighlight, toolbarRef }: PdfSelectionToolbarProps) {
+  const disabledButtonClassName = 'rounded p-1.5 text-ide-text-muted opacity-70';
+  const enabledButtonClassName = 'rounded p-1.5 text-ide-text transition-colors hover:bg-ide-hover hover:text-ide-text';
+
+  return (
+    <div
+      role="toolbar"
+      ref={toolbarRef}
+      aria-label="PDF selection tools"
+      data-testid="pdf-viewer-selection-toolbar"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      className="absolute z-30 inline-flex w-auto -translate-x-1/2 items-center gap-0.5 rounded-md border border-white/10 bg-[#303030] px-1.5 py-1.5 text-ide-text shadow-xl"
+      style={{
+        left: state.left,
+        top: state.top,
+        minHeight: PDF_SELECTION_TOOLBAR_HEIGHT_PX,
+      }}
+    >
+      <button type="button" aria-label="note" title="note" disabled className={disabledButtonClassName}>
+        <PanelTop size={17} />
+      </button>
+      <TooltipIconButton content="highlight" side="bottom">
+        <button
+          type="button"
+          aria-label="Highlight selection"
+          data-testid="pdf-viewer-selection-highlight"
+          onClick={onHighlight}
+          className={enabledButtonClassName}
+        >
+          <Highlighter size={17} />
+        </button>
+      </TooltipIconButton>
+      <button type="button" aria-label="text" title="text" disabled className={disabledButtonClassName}>
+        <Type size={17} />
+      </button>
+      <button type="button" aria-label="underline" title="underline" disabled className={disabledButtonClassName}>
+        <TextCursorInput size={17} />
+      </button>
+      <button type="button" aria-label="comment" title="comment" disabled className={disabledButtonClassName}>
+        <MessageSquarePlus size={17} />
+      </button>
+      <button type="button" aria-label="scan text" title="scan text" disabled className={disabledButtonClassName}>
+        <ScanText size={17} />
+      </button>
+      <div className="mx-1 h-5 w-px bg-white/15" />
+      <button type="button" aria-label="notebook" title="notebook" disabled className={disabledButtonClassName}>
+        <NotebookPen size={17} />
+      </button>
+    </div>
+  );
+}
+
 export function PdfViewerPane({
   fileId,
   fileName,
   showDragInteractionShield,
   dragInteractionShieldTestId,
 }: PdfViewerPaneProps) {
+  const paneRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const selectionToolbarRef = useRef<HTMLDivElement | null>(null);
   const thumbnailRailRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const restoredScrollForFileRef = useRef<string | null>(null);
+  const selectionToolbarFrameRef = useRef<number | null>(null);
+  const isTextSelectingRef = useRef(false);
   const handDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -931,6 +1128,7 @@ export function PdfViewerPane({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [selectionToolbar, setSelectionToolbar] = useState<PdfSelectionToolbarState | null>(null);
   const {
     activeSearchMatchIndex,
     fitMode,
@@ -996,13 +1194,73 @@ export function PdfViewerPane({
     return matches;
   }, [normalizedSearchQuery, pageNumbers, pageTextItems]);
   const activeSearchMatch = searchMatches[activeSearchMatchIndex] ?? null;
+  const hideSelectionToolbar = useCallback(() => {
+    setSelectionToolbar(null);
+  }, []);
+  const addHighlightFromCurrentSelection = useCallback((options: { requireSinglePage?: boolean } = {}) => {
+    const selectionInfo = getPdfSelectionInfo(viewportRef.current, zoom, options);
+    if (!selectionInfo) {
+      return false;
+    }
+
+    for (const pageMatch of selectionInfo.pageMatches) {
+      addHighlightAnnotation(fileId, {
+        pageNumber: pageMatch.pageNumber,
+        rects: pageMatch.rects,
+        quote: selectionInfo.quote,
+      });
+    }
+
+    selectionInfo.selection.removeAllRanges();
+    hideSelectionToolbar();
+    return true;
+  }, [addHighlightAnnotation, fileId, hideSelectionToolbar, zoom]);
+  const updateSelectionToolbar = useCallback(() => {
+    if (toolMode !== 'select') {
+      hideSelectionToolbar();
+      return;
+    }
+
+    const pane = paneRef.current;
+    const selectionInfo = getPdfSelectionInfo(viewportRef.current, zoom, { requireSinglePage: true });
+    if (!pane || !selectionInfo) {
+      hideSelectionToolbar();
+      return;
+    }
+
+    const paneRect = pane.getBoundingClientRect();
+    const centeredLeft = selectionInfo.bounds.left - paneRect.left + selectionInfo.bounds.width / 2;
+    const left = Math.min(Math.max(centeredLeft, 8), Math.max(8, paneRect.width - 8));
+    const belowTop = selectionInfo.bounds.bottom - paneRect.top + PDF_SELECTION_TOOLBAR_GAP_PX;
+    const top = belowTop + PDF_SELECTION_TOOLBAR_HEIGHT_PX <= paneRect.height - 8
+      ? belowTop
+      : Math.max(8, selectionInfo.bounds.top - paneRect.top - PDF_SELECTION_TOOLBAR_HEIGHT_PX - PDF_SELECTION_TOOLBAR_GAP_PX);
+
+    setSelectionToolbar({ left, top });
+  }, [hideSelectionToolbar, toolMode, zoom]);
+  const scheduleSelectionToolbarUpdate = useCallback(() => {
+    if (selectionToolbarFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectionToolbarFrameRef.current);
+    }
+
+    selectionToolbarFrameRef.current = window.requestAnimationFrame(() => {
+      selectionToolbarFrameRef.current = null;
+      updateSelectionToolbar();
+    });
+  }, [updateSelectionToolbar]);
+  const handleDocumentSelectionChange = useCallback(() => {
+    if (!getPdfSelectionInfo(viewportRef.current, zoom, { requireSinglePage: true })) {
+      hideSelectionToolbar();
+    }
+  }, [hideSelectionToolbar, zoom]);
 
   useEffect(() => {
     restoredScrollForFileRef.current = null;
     setPageSizes({});
     setPageTextItems({});
     setBookmarks([]);
-  }, [fileId, reloadToken]);
+    hideSelectionToolbar();
+  }, [fileId, hideSelectionToolbar, reloadToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1101,6 +1359,47 @@ export function PdfViewerPane({
   }, [pdfDocument]);
 
   useEffect(() => {
+    document.addEventListener('selectionchange', handleDocumentSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleDocumentSelectionChange);
+      if (selectionToolbarFrameRef.current !== null) {
+        window.cancelAnimationFrame(selectionToolbarFrameRef.current);
+        selectionToolbarFrameRef.current = null;
+      }
+    };
+  }, [handleDocumentSelectionChange]);
+
+  useEffect(() => {
+    if (!selectionToolbar) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const pane = paneRef.current;
+      const toolbar = selectionToolbarRef.current;
+      if (!pane || !toolbar) {
+        return;
+      }
+
+      const paneRect = pane.getBoundingClientRect();
+      const toolbarWidth = toolbar.offsetWidth || toolbar.getBoundingClientRect().width;
+      const halfWidth = toolbarWidth / 2;
+      const minLeft = halfWidth + 8;
+      const maxLeft = Math.max(minLeft, paneRect.width - halfWidth - 8);
+      const nextLeft = Math.min(Math.max(selectionToolbar.left, minLeft), maxLeft);
+      if (Math.abs(nextLeft - selectionToolbar.left) > 0.5) {
+        setSelectionToolbar((current) => current ? { ...current, left: nextLeft } : current);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [selectionToolbar]);
+
+  useEffect(() => {
+    hideSelectionToolbar();
+  }, [fileId, hideSelectionToolbar, pageNumber, toolMode, zoom]);
+
+  useEffect(() => {
     if (!pdfDocument || pageCount === 0 || restoredScrollForFileRef.current === fileId) {
       return undefined;
     }
@@ -1148,6 +1447,7 @@ export function PdfViewerPane({
 
   const handleViewportScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const viewport = event.currentTarget;
+    hideSelectionToolbar();
     setScrollPosition(fileId, {
       scrollLeft: viewport.scrollLeft,
       scrollTop: viewport.scrollTop,
@@ -1157,7 +1457,7 @@ export function PdfViewerPane({
       getViewportPageNumber(viewport, pageCount, pageSizes, zoom),
       pageCount,
     );
-  }, [fileId, pageCount, pageSizes, setPageNumberFromViewport, setScrollPosition, zoom]);
+  }, [fileId, hideSelectionToolbar, pageCount, pageSizes, setPageNumberFromViewport, setScrollPosition, zoom]);
 
   const scrollToPage = useCallback((nextPageNumber: number) => {
     const viewport = viewportRef.current;
@@ -1355,6 +1655,20 @@ export function PdfViewerPane({
     }
   }, [fileId, setScrollPosition, updateZoom, zoom]);
 
+  const handleViewportMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    isTextSelectingRef.current = toolMode === 'select' && Boolean(target?.closest('[data-pdf-text-layer="true"]'));
+    hideSelectionToolbar();
+  }, [hideSelectionToolbar, toolMode]);
+
+  const handleViewportMouseUp = useCallback(() => {
+    const wasTextSelecting = isTextSelectingRef.current;
+    isTextSelectingRef.current = false;
+    if (wasTextSelecting || getPdfSelectionInfo(viewportRef.current, zoom, { requireSinglePage: true })) {
+      scheduleSelectionToolbarUpdate();
+    }
+  }, [scheduleSelectionToolbarUpdate, zoom]);
+
   const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (toolMode !== 'hand' || event.button !== 0) {
       return;
@@ -1445,59 +1759,18 @@ export function PdfViewerPane({
     setActiveSearchMatchIndex(fileId, (activeSearchMatchIndex + 1) % searchMatches.length, searchMatches.length);
   };
   const handleAddHighlight = () => {
-    const viewport = viewportRef.current;
-    const selection = window.getSelection();
-    if (!viewport || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-      return;
-    }
-
-    const quote = selection.toString().trim();
-    const range = selection.getRangeAt(0);
-    const clientRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
-    if (clientRects.length === 0) {
-      return;
-    }
-
-    const pageElements = Array.from(viewport.querySelectorAll<HTMLElement>('[data-pdf-page-content="true"]'));
-    for (const pageElement of pageElements) {
-      const pageNumberValue = Number(pageElement.dataset['pdfPageNumber']);
-      if (!Number.isFinite(pageNumberValue)) {
-        continue;
-      }
-
-      const pageRect = pageElement.getBoundingClientRect();
-      const rects: PdfHighlightRect[] = [];
-      for (const rect of clientRects) {
-        const left = Math.max(rect.left, pageRect.left);
-        const right = Math.min(rect.right, pageRect.right);
-        const top = Math.max(rect.top, pageRect.top);
-        const bottom = Math.min(rect.bottom, pageRect.bottom);
-        if (right <= left || bottom <= top) {
-          continue;
-        }
-
-        rects.push({
-          left: (left - pageRect.left) / zoom,
-          top: (top - pageRect.top) / zoom,
-          width: (right - left) / zoom,
-          height: (bottom - top) / zoom,
-        });
-      }
-
-      if (rects.length > 0) {
-        addHighlightAnnotation(fileId, {
-          pageNumber: pageNumberValue,
-          rects,
-          quote,
-        });
-      }
-    }
-
-    selection.removeAllRanges();
+    addHighlightFromCurrentSelection();
+  };
+  const handleSelectionToolbarHighlight = () => {
+    addHighlightFromCurrentSelection({ requireSinglePage: true });
   };
 
   return (
-    <div data-testid="pdf-viewer-pane" className="relative flex min-h-0 flex-1 flex-col bg-ide-editor-bg text-ide-text">
+    <div
+      ref={paneRef}
+      data-testid="pdf-viewer-pane"
+      className="relative flex min-h-0 flex-1 flex-col bg-ide-editor-bg text-ide-text"
+    >
       <div
         data-testid="pdf-viewer-toolbar"
         className="flex h-9 shrink-0 items-center gap-1 border-b border-ide-border bg-ide-tab-bg px-2 text-[12px]"
@@ -1836,6 +2109,9 @@ export function PdfViewerPane({
             data-testid="pdf-viewer-scroll-viewport"
             tabIndex={0}
             onKeyDown={handleKeyDown}
+            onKeyUp={scheduleSelectionToolbarUpdate}
+            onMouseDown={handleViewportMouseDown}
+            onMouseUp={handleViewportMouseUp}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -1950,6 +2226,13 @@ export function PdfViewerPane({
             </div>
           )}
         </div>
+      )}
+      {selectionToolbar && (
+        <PdfSelectionToolbar
+          state={selectionToolbar}
+          onHighlight={handleSelectionToolbarHighlight}
+          toolbarRef={selectionToolbarRef}
+        />
       )}
       {showDragInteractionShield && (
         <div

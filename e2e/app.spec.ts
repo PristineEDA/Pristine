@@ -5003,6 +5003,7 @@ test('file tree opens PDF files in the center editor tab', async () => {
         createRange: () => {
           selectNodeContents: (node: unknown) => void;
         };
+        dispatchEvent: (event: Event) => void;
         querySelector: (selector: string) => unknown;
       };
       getSelection: () => {
@@ -5019,9 +5020,44 @@ test('file tree opens PDF files in the center editor tab', async () => {
     const selection = browserGlobal.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
+    browserGlobal.document.dispatchEvent(new Event('selectionchange'));
   });
-  await window.getByTestId('pdf-viewer-highlight-selection').click();
+  await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toHaveCount(0);
+  await viewport.dispatchEvent('mouseup');
+  await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await window.getByTestId('pdf-viewer-selection-highlight').click();
   await expect(window.getByTestId('pdf-viewer-highlight').first()).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await window.getByTestId('pdf-viewer-hand-tool').click();
+  await expect(window.getByTestId('pdf-viewer-hand-tool')).toHaveAttribute('aria-pressed', 'true');
+  await window.evaluate(() => {
+    const browserGlobal = globalThis as unknown as {
+      document: {
+        createRange: () => {
+          selectNodeContents: (node: unknown) => void;
+        };
+        dispatchEvent: (event: Event) => void;
+        querySelector: (selector: string) => unknown;
+      };
+      getSelection: () => {
+        addRange: (range: unknown) => void;
+        removeAllRanges: () => void;
+      } | null;
+    };
+    const firstTextSpan = browserGlobal.document.querySelector('[data-testid="pdf-viewer-text-layer-1"] span');
+    if (!firstTextSpan) {
+      throw new Error('Expected a PDF text span for hand tool selection.');
+    }
+    const range = browserGlobal.document.createRange();
+    range.selectNodeContents(firstTextSpan);
+    const selection = browserGlobal.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    browserGlobal.document.dispatchEvent(new Event('selectionchange'));
+  });
+  await viewport.dispatchEvent('mouseup');
+  await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toHaveCount(0);
+  await window.getByTestId('pdf-viewer-select-tool').click();
+  await expect(window.getByTestId('pdf-viewer-select-tool')).toHaveAttribute('aria-pressed', 'true');
   await viewport.click();
   await window.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
   await expect(window.getByTestId('pdf-viewer-search-input')).toBeVisible();
