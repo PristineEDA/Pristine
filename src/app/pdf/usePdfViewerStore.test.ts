@@ -17,6 +17,7 @@ const defaultSession = {
   scrollLeft: 0,
   searchQuery: '',
   isSearchOpen: false,
+  isInfoPanelOpen: false,
   activeSearchMatchIndex: 0,
   isBookmarkTreeVisible: true,
   isThumbnailRailVisible: true,
@@ -125,6 +126,23 @@ describe('usePdfViewerStore', () => {
     expect(usePdfViewerStore.getState().getSession('docs/other.pdf')).toEqual(defaultSession);
   });
 
+  it('stores info panel visibility per PDF file', () => {
+    usePdfViewerStore.getState().setInfoPanelOpen('docs/spec.pdf', true);
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toEqual({
+      ...defaultSession,
+      isInfoPanelOpen: true,
+    });
+    expect(usePdfViewerStore.getState().getSession('docs/other.pdf')).toEqual(defaultSession);
+
+    usePdfViewerStore.getState().setInfoPanelOpen('docs/spec.pdf', false);
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toEqual({
+      ...defaultSession,
+      isInfoPanelOpen: false,
+    });
+  });
+
   it('stores bookmark, thumbnail, and expanded bookmark state per PDF file', () => {
     usePdfViewerStore.getState().setBookmarkTreeVisible('docs/spec.pdf', false);
     usePdfViewerStore.getState().setThumbnailRailVisible('docs/spec.pdf', false);
@@ -179,6 +197,7 @@ describe('usePdfViewerStore', () => {
     usePdfViewerStore.getState().setZoom('docs/spec.pdf', 1.5);
     usePdfViewerStore.getState().setToolMode('docs/spec.pdf', 'hand');
     usePdfViewerStore.getState().setSearchOpen('docs/spec.pdf', true);
+    usePdfViewerStore.getState().setInfoPanelOpen('docs/spec.pdf', true);
     usePdfViewerStore.getState().setScrollPosition('docs/spec.pdf', { scrollTop: 120, scrollLeft: 24 });
     usePdfViewerStore.getState().setZoom('docs/other.pdf', 1.25);
 

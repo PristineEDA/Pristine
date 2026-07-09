@@ -18,6 +18,8 @@ vi.mock('pdfjs-dist/legacy/build/pdf.worker.mjs?url', () => ({
 
 interface MockPdfDocumentOptions {
   annotations?: Record<number, Array<Record<string, unknown>>>;
+  info?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   outline?: Array<Record<string, unknown>>;
 }
 
@@ -30,6 +32,12 @@ function createMockPdfDocument(
   const render = vi.fn(() => ({
     promise: Promise.resolve(),
     cancel: cancelRenderTask,
+  }));
+  const getMetadata = vi.fn(async () => ({
+    info: options.info ?? {},
+    metadata: {
+      get: vi.fn((key: string) => options.metadata?.[key]),
+    },
   }));
   const getPage = vi.fn(async (pageNumber: number) => ({
     getTextContent: vi.fn(async () => ({
@@ -62,6 +70,7 @@ function createMockPdfDocument(
     cleanup: vi.fn(),
     destroy: vi.fn(),
     getDestination: vi.fn(async (name: string) => (name === 'chapter-2' ? [{ num: 2, gen: 0 }] : null)),
+    getMetadata,
     getOutline: vi.fn(async () => options.outline ?? []),
     getPage,
     getPageIndex: vi.fn(async () => 1),
@@ -158,6 +167,72 @@ describe('PdfViewerPane', () => {
     expect(screen.getByTestId('pdf-viewer-page-canvas-1')).toHaveAttribute('height', '800');
     expect(await screen.findByTestId('pdf-viewer-text-layer-1')).toBeInTheDocument();
     expect(await screen.findByTestId('pdf-viewer-text-layer-2')).toBeInTheDocument();
+  });
+
+  it('shows PDF file information from document metadata', async () => {
+    vi.mocked(window.electronAPI!.fs.readFileBinary).mockResolvedValue(new Uint8Array(828_734));
+    const pdfDocument = createMockPdfDocument(11, {}, {
+      info: {
+        Author: 'Yuchi Miao',
+        CreationDate: 'D:20260707074950',
+        Creator: 'Typst 0.15.0',
+        IsLinearized: false,
+        Keywords: 'retroSoC',
+        ModDate: 'D:20260707074950',
+        PDFFormatVersion: '1.7',
+      },
+      metadata: {
+        'dc:title': 'retroSoC Mini Gen2 Datasheet',
+      },
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 11'));
+    await waitFor(() => expect(pdfDocument.getMetadata).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-info-menu'));
+
+    expect(await screen.findByTestId('pdf-viewer-info-popover')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-info-content')).toHaveClass('w-[400px]');
+    expect(screen.getByTestId('pdf-viewer-info-popover')).toHaveClass('w-full');
+    expect(screen.getByTestId('pdf-viewer-info-row-fileName')).toHaveClass('grid-cols-[132px_minmax(0,1fr)]', 'gap-2');
+    expect(screen.getByTestId('pdf-viewer-info-fileName')).toHaveTextContent('spec.pdf');
+    expect(screen.getByTestId('pdf-viewer-info-fileName')).toHaveClass('overflow-x-auto', 'whitespace-nowrap');
+    expect(screen.getByTestId('pdf-viewer-info-fileName')).not.toHaveClass('break-words', '[overflow-wrap:anywhere]');
+    expect(screen.getByTestId('pdf-viewer-info-fileSize')).toHaveTextContent('809 KB (828,734 bytes)');
+    expect(screen.getByTestId('pdf-viewer-info-title')).toHaveTextContent('retroSoC Mini Gen2 Datasheet');
+    expect(screen.getByTestId('pdf-viewer-info-author')).toHaveTextContent('Yuchi Miao');
+    expect(screen.getByTestId('pdf-viewer-info-keywords')).toHaveTextContent('retroSoC');
+    expect(screen.getByTestId('pdf-viewer-info-creator')).toHaveTextContent('Typst 0.15.0');
+    expect(screen.getByTestId('pdf-viewer-info-pdfVersion')).toHaveTextContent('1.7');
+    expect(screen.getByTestId('pdf-viewer-info-pageCount')).toHaveTextContent('11');
+    expect(screen.getByTestId('pdf-viewer-info-pageSize')).toHaveTextContent('8.33 × 11.11 in (portrait)');
+    expect(screen.getByTestId('pdf-viewer-info-fastWebView')).toHaveTextContent('No');
+    expect(screen.getByTestId('pdf-viewer-info-creationDate')).toHaveTextContent('7/7/26, 7:49:50 AM');
+    expect(screen.getByTestId('pdf-viewer-info-modificationDate')).toHaveTextContent('7/7/26, 7:49:50 AM');
+  });
+
+  it('closes the PDF information popover and shows placeholders for missing metadata', async () => {
+    const pdfDocument = createMockPdfDocument(1);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 1'));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-info-menu'));
+
+    expect(await screen.findByTestId('pdf-viewer-info-popover')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-info-title')).toHaveTextContent('-');
+    expect(screen.getByTestId('pdf-viewer-info-producer')).toHaveTextContent('-');
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isInfoPanelOpen).toBe(true);
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-info-close'));
+
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-info-popover')).not.toBeInTheDocument());
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isInfoPanelOpen).toBe(false);
   });
 
   it('renders bookmarks and link overlays, and opens links through Electron shell', async () => {

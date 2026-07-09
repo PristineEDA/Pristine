@@ -811,6 +811,7 @@ function createE2EPdfBuffer(pageCount = 2) {
   const outlinesObjectId = fontObjectId + 1;
   const firstOutlineObjectId = outlinesObjectId + 1;
   const linkObjectId = firstOutlineObjectId + normalizedPageCount;
+  const infoObjectId = linkObjectId + 1;
   const pageKids = pageObjects.map(({ pageId }) => `${pageId} 0 R`).join(' ');
 
   addObject(1, `<< /Type /Catalog /Pages 2 0 R /Outlines ${outlinesObjectId} 0 R >>`);
@@ -841,16 +842,17 @@ function createE2EPdfBuffer(pageCount = 2) {
   }
 
   addObject(linkObjectId, '<< /Type /Annot /Subtype /Link /Rect [72 1200 560 1280] /Border [0 0 0] /A << /S /URI /URI (https://example.com/pristine-pdf) >> >>');
+  addObject(infoObjectId, '<< /Title (Pristine PDF E2E Spec) /Author (Pristine E2E) /Subject (PDF viewer metadata) /Keywords (Pristine PDF) /CreationDate (D:20260707074950) /ModDate (D:20260707074950) /Creator (Pristine E2E generator) /Producer (Pristine E2E PDF writer) >>');
 
   const xrefOffset = Buffer.byteLength(parts.join(''), 'ascii');
   parts.push('xref\n');
-  parts.push(`0 ${linkObjectId + 1}\n`);
+  parts.push(`0 ${infoObjectId + 1}\n`);
   parts.push('0000000000 65535 f \n');
-  for (let objectId = 1; objectId <= linkObjectId; objectId += 1) {
+  for (let objectId = 1; objectId <= infoObjectId; objectId += 1) {
     parts.push(`${String(offsets[objectId]).padStart(10, '0')} 00000 n \n`);
   }
   parts.push('trailer\n');
-  parts.push(`<< /Size ${linkObjectId + 1} /Root 1 0 R >>\n`);
+  parts.push(`<< /Size ${infoObjectId + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\n`);
   parts.push('startxref\n');
   parts.push(`${xrefOffset}\n`);
   parts.push('%%EOF\n');
@@ -4737,8 +4739,9 @@ test('explorer opens a file into a new editor tab', async () => {
 });
 
 test('file tree opens PDF files in the center editor tab', async () => {
+  const pdfBuffer = createE2EPdfBuffer();
   const projectRoot = createWorkspaceCopyWithFiles('pdf-viewer-project', {
-    'docs/spec.pdf': createE2EPdfBuffer(),
+    'docs/spec.pdf': pdfBuffer,
   });
   const { app, window } = await launchApp({ projectRoot });
 
@@ -4801,6 +4804,24 @@ test('file tree opens PDF files in the center editor tab', async () => {
     timeout: UI_READY_TIMEOUT_MS,
   }).toBeGreaterThan(0);
   const initialCanvasWidth = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
+
+  await window.getByTestId('pdf-viewer-info-menu').click();
+  await expect(window.getByTestId('pdf-viewer-info-popover')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  const infoContentBox = await window.getByTestId('pdf-viewer-info-content').boundingBox();
+  const pdfViewerBox = await window.getByTestId('pdf-viewer-pane').boundingBox();
+  expect(infoContentBox).not.toBeNull();
+  expect(pdfViewerBox).not.toBeNull();
+  expect(infoContentBox!.x + infoContentBox!.width).toBeLessThanOrEqual(pdfViewerBox!.x + pdfViewerBox!.width + 1);
+  await expect(window.getByTestId('pdf-viewer-info-fileName')).toContainText('spec.pdf');
+  await expect(window.getByTestId('pdf-viewer-info-fileSize')).toContainText(`${pdfBuffer.length.toLocaleString('en-US')} bytes`);
+  await expect(window.getByTestId('pdf-viewer-info-title')).toContainText('Pristine PDF E2E Spec');
+  await expect(window.getByTestId('pdf-viewer-info-author')).toContainText('Pristine E2E');
+  await expect(window.getByTestId('pdf-viewer-info-pdfVersion')).toContainText('1.4');
+  await expect(window.getByTestId('pdf-viewer-info-pageCount')).toContainText('2');
+  await expect(window.getByTestId('pdf-viewer-info-pageSize')).toContainText('16.67 × 19.44 in');
+  await expect(window.getByTestId('pdf-viewer-info-fastWebView')).toContainText('No');
+  await window.getByTestId('pdf-viewer-info-close').click();
+  await expect(window.getByTestId('pdf-viewer-info-popover')).toHaveCount(0);
 
   const pageToneMenu = window.getByTestId('pdf-viewer-page-tone-menu');
   await pageToneMenu.focus();

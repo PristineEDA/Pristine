@@ -20,6 +20,7 @@ import {
   Contrast,
   Hand,
   Highlighter,
+  Info,
   Maximize2,
   MessageSquarePlus,
   MoveHorizontal,
@@ -58,6 +59,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
 import { TooltipIconButton } from '../../ui/tooltip-icon-button';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -153,6 +155,29 @@ interface PdfSelectionToolbarState {
   top: number;
 }
 
+interface PdfDocumentInfo {
+  fileName: string;
+  fileSize: string;
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+  creationDate: string;
+  modificationDate: string;
+  creator: string;
+  producer: string;
+  pdfVersion: string;
+  pageCount: string;
+  pageSize: string;
+  fastWebView: string;
+}
+
+type PdfMetadataObject = {
+  get?: (key: string) => unknown;
+};
+
+type PdfInfoDictionary = Record<string, unknown>;
+
 interface PdfPageCanvasProps {
   pageNumber: number;
   pdfDocument: PDFDocumentProxy;
@@ -240,6 +265,182 @@ function getPageToneCanvasClassName(mode: PdfViewerPageToneMode): string {
 
 function getPageToneCanvasStyle(mode: PdfViewerPageToneMode): CSSProperties {
   return mode === 'soft' ? { filter: PDF_VIEWER_SOFT_PAGE_FILTER } : {};
+}
+
+function normalizePdfInfoText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map(normalizePdfInfoText).filter(Boolean).join('\n');
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return '';
+}
+
+function formatPdfInfoValue(value: unknown): string {
+  return normalizePdfInfoText(value) || '-';
+}
+
+function getPdfMetadataValue(metadata: unknown, key: string): string {
+  const getter = (metadata as PdfMetadataObject | null)?.get;
+  if (typeof getter !== 'function') {
+    return '';
+  }
+
+  try {
+    return normalizePdfInfoText(getter.call(metadata, key));
+  } catch {
+    return '';
+  }
+}
+
+function getPdfInfoValue(info: PdfInfoDictionary, key: string): string {
+  return normalizePdfInfoText(info[key]);
+}
+
+function formatPdfFileSize(byteLength: number | null): string {
+  if (!Number.isFinite(byteLength) || byteLength === null || byteLength < 0) {
+    return '-';
+  }
+
+  const bytes = Math.floor(byteLength);
+  const formattedBytes = new Intl.NumberFormat('en-US').format(bytes);
+  if (bytes < 1024) {
+    return `${formattedBytes} bytes`;
+  }
+
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) {
+    return `${Math.round(kilobytes).toLocaleString('en-US')} KB (${formattedBytes} bytes)`;
+  }
+
+  const megabytes = kilobytes / 1024;
+  return `${megabytes.toFixed(1)} MB (${formattedBytes} bytes)`;
+}
+
+function parsePdfDateString(value: unknown): Date | null {
+  const text = normalizePdfInfoText(value);
+  if (!text) {
+    return null;
+  }
+
+  const parsedMetadataDate = Date.parse(text);
+  if (Number.isFinite(parsedMetadataDate)) {
+    return new Date(parsedMetadataDate);
+  }
+
+  const match = /^D:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?([Zz]|[+-])?(\d{2})?'?(\d{2})?'?/.exec(text);
+  if (!match) {
+    return null;
+  }
+
+  const [, yearText, monthText = '01', dayText = '01', hourText = '00', minuteText = '00', secondText = '00', zone, zoneHourText = '00', zoneMinuteText = '00'] = match;
+  const year = Number(yearText);
+  const month = Number(monthText) - 1;
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+
+  if ([year, month, day, hour, minute, second].some((part) => !Number.isFinite(part))) {
+    return null;
+  }
+
+  if (!zone) {
+    return new Date(year, month, day, hour, minute, second);
+  }
+
+  const zoneHour = Number(zoneHourText);
+  const zoneMinute = Number(zoneMinuteText);
+  if (!Number.isFinite(zoneHour) || !Number.isFinite(zoneMinute)) {
+    return null;
+  }
+
+  const offsetMinutes = zone === '-' ? -(zoneHour * 60 + zoneMinute) : zoneHour * 60 + zoneMinute;
+  const utcTime = Date.UTC(year, month, day, hour, minute, second) - offsetMinutes * 60_000;
+  return new Date(utcTime);
+}
+
+function formatPdfDate(metadataValue: unknown, infoValue: unknown): string {
+  const date = parsePdfDateString(metadataValue) ?? parsePdfDateString(infoValue);
+  if (!date) {
+    return '-';
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    year: '2-digit',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
+}
+
+function detectPdfPageName(widthInches: number, heightInches: number): string | null {
+  const shortSide = Math.min(widthInches, heightInches);
+  const longSide = Math.max(widthInches, heightInches);
+  const candidates = [
+    { name: 'A4', width: 8.27, height: 11.69 },
+    { name: 'Letter', width: 8.5, height: 11 },
+    { name: 'Legal', width: 8.5, height: 14 },
+  ];
+
+  for (const candidate of candidates) {
+    if (Math.abs(shortSide - candidate.width) <= 0.08 && Math.abs(longSide - candidate.height) <= 0.08) {
+      return candidate.name;
+    }
+  }
+
+  return null;
+}
+
+function formatPdfPageSizeFromViewport(viewport: { width: number; height: number } | null): string {
+  if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) {
+    return '-';
+  }
+
+  const widthInches = viewport.width / 72;
+  const heightInches = viewport.height / 72;
+  const orientation = widthInches > heightInches ? 'landscape' : 'portrait';
+  const pageName = detectPdfPageName(widthInches, heightInches);
+  const dimensions = `${widthInches.toFixed(2)} \u00d7 ${heightInches.toFixed(2)} in`;
+  return pageName ? `${dimensions} (${pageName}, ${orientation})` : `${dimensions} (${orientation})`;
+}
+
+async function createPdfDocumentInfo(
+  document: PDFDocumentProxy,
+  fileName: string,
+  fileSizeBytes: number | null,
+): Promise<PdfDocumentInfo> {
+  const metadataResult = await document.getMetadata().catch(() => ({ info: {}, metadata: null }));
+  const info = (metadataResult.info ?? {}) as PdfInfoDictionary;
+  const metadata = metadataResult.metadata;
+  const firstPage = await document.getPage(1).catch(() => null);
+  const pageViewport = firstPage?.getViewport({ scale: 1 }) ?? null;
+
+  return {
+    fileName: formatPdfInfoValue(fileName),
+    fileSize: formatPdfFileSize(fileSizeBytes),
+    title: formatPdfInfoValue(getPdfMetadataValue(metadata, 'dc:title') || getPdfInfoValue(info, 'Title')),
+    author: formatPdfInfoValue(getPdfMetadataValue(metadata, 'dc:creator') || getPdfInfoValue(info, 'Author')),
+    subject: formatPdfInfoValue(getPdfMetadataValue(metadata, 'dc:subject') || getPdfInfoValue(info, 'Subject')),
+    keywords: formatPdfInfoValue(getPdfMetadataValue(metadata, 'pdf:keywords') || getPdfInfoValue(info, 'Keywords')),
+    creationDate: formatPdfDate(getPdfMetadataValue(metadata, 'xmp:createdate'), info.CreationDate),
+    modificationDate: formatPdfDate(getPdfMetadataValue(metadata, 'xmp:modifydate'), info.ModDate),
+    creator: formatPdfInfoValue(getPdfMetadataValue(metadata, 'xmp:creatortool') || getPdfInfoValue(info, 'Creator')),
+    producer: formatPdfInfoValue(getPdfMetadataValue(metadata, 'pdf:producer') || getPdfInfoValue(info, 'Producer')),
+    pdfVersion: formatPdfInfoValue(getPdfInfoValue(info, 'PDFFormatVersion')),
+    pageCount: String(document.numPages),
+    pageSize: formatPdfPageSizeFromViewport(pageViewport),
+    fastWebView: info.IsLinearized === true ? 'Yes' : 'No',
+  };
 }
 
 function getPageSize(pageSizes: Record<number, PdfPageSize>, pageNumber: number, zoom: number): PdfPageSize {
@@ -961,6 +1162,92 @@ function PdfThumbnailCanvas({
   );
 }
 
+interface PdfInfoPopoverContentProps {
+  info: PdfDocumentInfo | null;
+  isLoading: boolean;
+  errorMessage: string | null;
+  onClose: () => void;
+}
+
+const PDF_INFO_SECTIONS: Array<Array<[keyof PdfDocumentInfo, string]>> = [
+  [
+    ['fileName', 'File name:'],
+    ['fileSize', 'File size:'],
+  ],
+  [
+    ['title', 'Title:'],
+    ['author', 'Author:'],
+    ['subject', 'Subject:'],
+    ['keywords', 'Keywords:'],
+    ['creationDate', 'Creation Date:'],
+    ['modificationDate', 'Modification Date:'],
+    ['creator', 'Creator:'],
+  ],
+  [
+    ['producer', 'PDF Producer:'],
+    ['pdfVersion', 'PDF Version:'],
+    ['pageCount', 'Page Count:'],
+    ['pageSize', 'Page Size:'],
+  ],
+  [
+    ['fastWebView', 'Fast Web View:'],
+  ],
+];
+
+function PdfInfoPopoverContent({
+  info,
+  isLoading,
+  errorMessage,
+  onClose,
+}: PdfInfoPopoverContentProps) {
+  const valueFor = (key: keyof PdfDocumentInfo) => info?.[key] ?? '-';
+
+  return (
+    <div className="w-full min-w-0 text-[12px] text-ide-text" data-testid="pdf-viewer-info-popover">
+      {isLoading ? (
+        <div className="py-5 text-center text-ide-text-muted">Loading PDF information...</div>
+      ) : (
+        <div className="space-y-3">
+          {errorMessage ? (
+            <div className="rounded border border-ide-border bg-ide-editor-bg px-3 py-2 text-ide-text-muted">
+              Unable to read some PDF information.
+            </div>
+          ) : null}
+          {PDF_INFO_SECTIONS.map((section, sectionIndex) => (
+            <div
+              key={`pdf-info-section-${sectionIndex}`}
+              className={sectionIndex === 0 ? 'space-y-1.5' : 'space-y-1.5 border-t border-ide-border pt-3'}
+            >
+              {section.map(([key, label]) => (
+                <div
+                  key={key}
+                  className="grid min-w-0 grid-cols-[132px_minmax(0,1fr)] gap-2 leading-5"
+                  data-testid={`pdf-viewer-info-row-${key}`}
+                >
+                  <div className="min-w-0 whitespace-nowrap font-semibold text-ide-text">{label}</div>
+                  <div className="min-w-0 overflow-x-auto whitespace-nowrap font-semibold text-ide-text [scrollbar-width:thin]" data-testid={`pdf-viewer-info-${key}`}>
+                    {valueFor(key)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-4 flex justify-center">
+        <button
+          type="button"
+          data-testid="pdf-viewer-info-close"
+          onClick={onClose}
+          className="rounded bg-ide-hover px-4 py-1.5 text-[12px] font-semibold text-ide-text transition-colors hover:bg-ide-border"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface PdfBookmarkTreeProps {
   bookmarks: PdfBookmark[];
   expandedBookmarkIds: string[];
@@ -1118,6 +1405,10 @@ export function PdfViewerPane({
     scrollTop: number;
   } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [pdfFileByteLength, setPdfFileByteLength] = useState<number | null>(null);
+  const [pdfDocumentInfo, setPdfDocumentInfo] = useState<PdfDocumentInfo | null>(null);
+  const [pdfDocumentInfoError, setPdfDocumentInfoError] = useState<string | null>(null);
+  const [isPdfDocumentInfoLoading, setIsPdfDocumentInfoLoading] = useState(false);
   const [pageCount, setPageCount] = useState(0);
   const [pageSizes, setPageSizes] = useState<Record<number, PdfPageSize>>({});
   const [pageTextItems, setPageTextItems] = useState<Record<number, PdfTextItem[]>>({});
@@ -1135,6 +1426,7 @@ export function PdfViewerPane({
     expandedBookmarkIds,
     highlightAnnotations,
     isBookmarkTreeVisible,
+    isInfoPanelOpen,
     isSearchOpen,
     isThumbnailRailVisible,
     pageNumber,
@@ -1153,6 +1445,7 @@ export function PdfViewerPane({
   const setPageNumberFromViewport = usePdfViewerStore((state) => state.setPageNumberFromViewport);
   const setScrollPosition = usePdfViewerStore((state) => state.setScrollPosition);
   const setSearchOpen = usePdfViewerStore((state) => state.setSearchOpen);
+  const setInfoPanelOpen = usePdfViewerStore((state) => state.setInfoPanelOpen);
   const setSearchQuery = usePdfViewerStore((state) => state.setSearchQuery);
   const setPageToneMode = usePdfViewerStore((state) => state.setPageToneMode);
   const setToolMode = usePdfViewerStore((state) => state.setToolMode);
@@ -1259,6 +1552,10 @@ export function PdfViewerPane({
     setPageSizes({});
     setPageTextItems({});
     setBookmarks([]);
+    setPdfFileByteLength(null);
+    setPdfDocumentInfo(null);
+    setPdfDocumentInfoError(null);
+    setIsPdfDocumentInfoLoading(false);
     hideSelectionToolbar();
   }, [fileId, hideSelectionToolbar, reloadToken]);
 
@@ -1269,6 +1566,10 @@ export function PdfViewerPane({
     const readBytes = getPdfBytesReader(fileId);
     if (!readBytes) {
       setPdfDocument(null);
+      setPdfFileByteLength(null);
+      setPdfDocumentInfo(null);
+      setPdfDocumentInfoError(null);
+      setIsPdfDocumentInfoLoading(false);
       setPageCount(0);
       setIsLoading(false);
       setLoadError('Filesystem API unavailable');
@@ -1279,15 +1580,25 @@ export function PdfViewerPane({
     setLoadError(null);
     setRenderError(null);
     setPdfDocument(null);
+    setPdfFileByteLength(null);
+    setPdfDocumentInfo(null);
+    setPdfDocumentInfoError(null);
     setPageCount(0);
 
     void readBytes(fileId)
-      .then((bytes) => getDocument({
-        data: normalizePdfBytes(bytes),
-        cMapPacked: true,
-        cMapUrl: `${PDFJS_ASSET_BASE_URL}cmaps/`,
-        standardFontDataUrl: `${PDFJS_ASSET_BASE_URL}standard_fonts/`,
-      }).promise)
+      .then((bytes) => {
+        const normalizedBytes = normalizePdfBytes(bytes);
+        if (!cancelled) {
+          setPdfFileByteLength(normalizedBytes.byteLength);
+        }
+
+        return getDocument({
+          data: normalizedBytes,
+          cMapPacked: true,
+          cMapUrl: `${PDFJS_ASSET_BASE_URL}cmaps/`,
+          standardFontDataUrl: `${PDFJS_ASSET_BASE_URL}standard_fonts/`,
+        }).promise;
+      })
       .then((document) => {
         if (cancelled) {
           cleanupPdfDocument(document);
@@ -1318,6 +1629,8 @@ export function PdfViewerPane({
         }
 
         setPdfDocument(null);
+        setPdfFileByteLength(null);
+        setPdfDocumentInfo(null);
         setPageCount(0);
         setLoadError(getErrorMessage(error));
       })
@@ -1332,6 +1645,41 @@ export function PdfViewerPane({
       cleanupPdfDocument(loadedDocument);
     };
   }, [fileId, reloadToken, setPageNumber]);
+
+  useEffect(() => {
+    if (!pdfDocument) {
+      setPdfDocumentInfo(null);
+      setPdfDocumentInfoError(null);
+      setIsPdfDocumentInfoLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsPdfDocumentInfoLoading(true);
+    setPdfDocumentInfoError(null);
+
+    void createPdfDocumentInfo(pdfDocument, fileName, pdfFileByteLength)
+      .then((info) => {
+        if (!cancelled) {
+          setPdfDocumentInfo(info);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setPdfDocumentInfo(null);
+          setPdfDocumentInfoError(getErrorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsPdfDocumentInfoLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fileName, pdfDocument, pdfFileByteLength]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -1884,6 +2232,39 @@ export function PdfViewerPane({
               <Highlighter size={14} />
             </button>
           </TooltipIconButton>
+          <Popover open={isInfoPanelOpen} onOpenChange={(open) => setInfoPanelOpen(fileId, open)}>
+            <TooltipIconButton content="PDF Information">
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="PDF Information"
+                  aria-pressed={isInfoPanelOpen}
+                  data-testid="pdf-viewer-info-menu"
+                  disabled={isLoading || !pdfDocument}
+                  className={[
+                    'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                    isInfoPanelOpen ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+                  ].join(' ')}
+                >
+                  <Info size={14} />
+                </button>
+              </PopoverTrigger>
+            </TooltipIconButton>
+            <PopoverContent
+              align="end"
+              side="bottom"
+              sideOffset={8}
+              data-testid="pdf-viewer-info-content"
+              className="w-[400px] max-w-[calc(100vw-32px)] min-w-0 border-ide-border bg-ide-tab-bg p-4 text-ide-text shadow-xl"
+            >
+              <PdfInfoPopoverContent
+                info={pdfDocumentInfo}
+                isLoading={isPdfDocumentInfoLoading}
+                errorMessage={pdfDocumentInfoError}
+                onClose={() => setInfoPanelOpen(fileId, false)}
+              />
+            </PopoverContent>
+          </Popover>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

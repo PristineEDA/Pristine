@@ -42,6 +42,7 @@ export interface PdfViewerSession {
   scrollLeft: number;
   searchQuery: string;
   isSearchOpen: boolean;
+  isInfoPanelOpen: boolean;
   activeSearchMatchIndex: number;
   isBookmarkTreeVisible: boolean;
   isThumbnailRailVisible: boolean;
@@ -60,6 +61,7 @@ interface PdfViewerStoreState {
   setToolMode: (fileId: string, toolMode: PdfViewerToolMode) => void;
   setPageToneMode: (fileId: string, mode: PdfViewerPageToneMode) => void;
   setSearchOpen: (fileId: string, isOpen: boolean) => void;
+  setInfoPanelOpen: (fileId: string, isOpen: boolean) => void;
   setSearchQuery: (fileId: string, query: string) => void;
   setActiveSearchMatchIndex: (fileId: string, index: number, matchCount?: number) => void;
   setBookmarkTreeVisible: (fileId: string, visible: boolean) => void;
@@ -154,6 +156,7 @@ const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   scrollLeft: 0,
   searchQuery: '',
   isSearchOpen: false,
+  isInfoPanelOpen: false,
   activeSearchMatchIndex: 0,
   isBookmarkTreeVisible: true,
   isThumbnailRailVisible: true,
@@ -340,6 +343,28 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           [fileId]: {
             ...current,
             isSearchOpen: isOpen,
+          },
+        },
+      };
+    });
+  },
+  setInfoPanelOpen: (fileId, isOpen) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      if (current.isInfoPanelOpen === isOpen) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            isInfoPanelOpen: isOpen,
           },
         },
       };
