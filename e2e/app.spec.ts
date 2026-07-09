@@ -4834,6 +4834,30 @@ test('file tree opens PDF files in the center editor tab', async () => {
     timeout: UI_READY_TIMEOUT_MS,
   }).toBe(initialCanvasHeight);
 
+  const presentationButton = window.getByTestId('pdf-viewer-presentation-mode');
+  await expect(presentationButton).toBeVisible();
+  await expect(presentationButton).toBeEnabled();
+  await presentationButton.click();
+  await expect(window.getByTestId('pdf-viewer-pane')).toHaveAttribute('data-pdf-presentation-mode', 'true', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-toolbar')).toHaveCount(0);
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toHaveCount(0);
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toHaveCount(0);
+  await expect(window.getByTestId('pdf-viewer-page-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-2')).toHaveCount(0);
+
+  await window.keyboard.press('Escape');
+  await expect(window.getByTestId('pdf-viewer-pane')).not.toHaveAttribute('data-pdf-presentation-mode', 'true', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-toolbar')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
   await window.getByTestId('pdf-viewer-info-menu').click();
   await expect(window.getByTestId('pdf-viewer-info-popover')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   const infoContentBox = await window.getByTestId('pdf-viewer-info-content').boundingBox();

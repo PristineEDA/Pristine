@@ -31,6 +31,7 @@ import {
   PanelLeft,
   PanelRight,
   PanelTop,
+  Presentation,
   RotateCcw,
   RotateCw,
   ScanText,
@@ -52,6 +53,7 @@ import {
   type PdfHighlightRect,
   type PdfViewerFitMode,
   type PdfViewerPageToneMode,
+  type PdfViewerPresentationRestoreState,
   type PdfViewerRotation,
   type PdfViewerToolMode,
   usePdfViewerStore,
@@ -80,6 +82,8 @@ const PDF_VIEWER_SOFT_PAGE_FILTER = 'brightness(0.9) contrast(0.96)';
 const PDF_VIEWER_AUTO_PAGE_FILTER_CLASS = 'dark:[filter:brightness(0.9)_contrast(0.96)]';
 const PDF_SELECTION_TOOLBAR_HEIGHT_PX = 38;
 const PDF_SELECTION_TOOLBAR_GAP_PX = 7;
+const PDF_PRESENTATION_WHEEL_THRESHOLD_PX = 80;
+const PDF_PRESENTATION_WHEEL_COOLDOWN_MS = 500;
 
 const PDF_VIEWER_PAGE_TONE_OPTIONS: Array<{ value: PdfViewerPageToneMode; label: string }> = [
   { value: 'auto', label: 'Auto' },
@@ -1064,6 +1068,7 @@ function PdfPageLinkLayer({
         <button
           key={`${link.id}-${index}`}
           type="button"
+          data-pdf-link="true"
           data-testid={`pdf-viewer-link-${pageNumber}-${index}`}
           aria-label={`Open link ${link.url}`}
           title={link.url}
@@ -1409,6 +1414,9 @@ export function PdfViewerPane({
   const restoredScrollForFileRef = useRef<string | null>(null);
   const selectionToolbarFrameRef = useRef<number | null>(null);
   const isTextSelectingRef = useRef(false);
+  const presentationRestoreRef = useRef<PdfViewerPresentationRestoreState | null>(null);
+  const presentationWheelDeltaRef = useRef(0);
+  const presentationWheelTimeStampRef = useRef(0);
   const handDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -1427,6 +1435,7 @@ export function PdfViewerPane({
   const [bookmarks, setBookmarks] = useState<PdfBookmark[]>([]);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [isHandDragging, setIsHandDragging] = useState(false);
+  const [isFullscreenSupported, setIsFullscreenSupported] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -1439,6 +1448,7 @@ export function PdfViewerPane({
     highlightAnnotations,
     isBookmarkTreeVisible,
     isInfoPanelOpen,
+    isPresentationModeActive,
     isSearchOpen,
     isThumbnailRailVisible,
     pageNumber,
@@ -1449,6 +1459,8 @@ export function PdfViewerPane({
     zoom,
   } = usePdfViewerStore((state) => state.getSession(fileId));
   const setActiveSearchMatchIndex = usePdfViewerStore((state) => state.setActiveSearchMatchIndex);
+  const enterPresentationMode = usePdfViewerStore((state) => state.enterPresentationMode);
+  const exitPresentationMode = usePdfViewerStore((state) => state.exitPresentationMode);
   const setFitMode = usePdfViewerStore((state) => state.setFitMode);
   const setBookmarkTreeVisible = usePdfViewerStore((state) => state.setBookmarkTreeVisible);
   const setThumbnailRailVisible = usePdfViewerStore((state) => state.setThumbnailRailVisible);
@@ -1472,6 +1484,10 @@ export function PdfViewerPane({
     () => Array.from({ length: pageCount }, (_, index) => index + 1),
     [pageCount],
   );
+  const visiblePageNumbers = useMemo(
+    () => (isPresentationModeActive && pageCount > 0 ? [pageNumber] : pageNumbers),
+    [isPresentationModeActive, pageCount, pageNumber, pageNumbers],
+  );
   const renderedPageRange = useMemo(() => ({
     start: Math.max(1, pageNumber - PDF_VIEWER_RENDER_OVERSCAN),
     end: Math.min(pageCount, pageNumber + PDF_VIEWER_RENDER_OVERSCAN),
@@ -1480,6 +1496,7 @@ export function PdfViewerPane({
     start: Math.max(1, pageNumber - PDF_VIEWER_THUMBNAIL_OVERSCAN),
     end: Math.min(pageCount, pageNumber + PDF_VIEWER_THUMBNAIL_OVERSCAN),
   }), [pageCount, pageNumber]);
+  const effectiveToolMode: PdfViewerToolMode = isPresentationModeActive ? 'hand' : toolMode;
   const normalizedSearchQuery = getNormalizedSearchQuery(searchQuery);
   const searchMatches = useMemo(() => {
     if (!normalizedSearchQuery) {
@@ -1505,6 +1522,10 @@ export function PdfViewerPane({
   const activeSearchMatch = searchMatches[activeSearchMatchIndex] ?? null;
   const hideSelectionToolbar = useCallback(() => {
     setSelectionToolbar(null);
+  }, []);
+  const resetPresentationWheelState = useCallback(() => {
+    presentationWheelDeltaRef.current = 0;
+    presentationWheelTimeStampRef.current = 0;
   }, []);
   const addHighlightFromCurrentSelection = useCallback((options: { requireSinglePage?: boolean } = {}) => {
     const selectionInfo = getPdfSelectionInfo(viewportRef.current, zoom, options);
@@ -1564,6 +1585,14 @@ export function PdfViewerPane({
   }, [hideSelectionToolbar, zoom]);
 
   useEffect(() => {
+    setIsFullscreenSupported(
+      typeof document !== 'undefined'
+      && document.fullscreenEnabled !== false
+      && typeof document.documentElement.requestFullscreen === 'function',
+    );
+  }, []);
+
+  useEffect(() => {
     restoredScrollForFileRef.current = null;
     setPageSizes({});
     setPageTextItems({});
@@ -1572,8 +1601,10 @@ export function PdfViewerPane({
     setPdfDocumentInfo(null);
     setPdfDocumentInfoError(null);
     setIsPdfDocumentInfoLoading(false);
+    presentationRestoreRef.current = null;
+    resetPresentationWheelState();
     hideSelectionToolbar();
-  }, [fileId, hideSelectionToolbar, reloadToken]);
+  }, [fileId, hideSelectionToolbar, reloadToken, resetPresentationWheelState]);
 
   useEffect(() => {
     setPageSizes({});
@@ -1767,7 +1798,7 @@ export function PdfViewerPane({
 
   useEffect(() => {
     hideSelectionToolbar();
-  }, [fileId, hideSelectionToolbar, pageNumber, toolMode, zoom]);
+  }, [fileId, hideSelectionToolbar, isPresentationModeActive, pageNumber, toolMode, zoom]);
 
   useEffect(() => {
     if (!pdfDocument || pageCount === 0 || restoredScrollForFileRef.current === fileId) {
@@ -1846,6 +1877,112 @@ export function PdfViewerPane({
     });
     setPageNumber(fileId, normalizedPageNumber, pageCount);
   }, [fileId, pageCount, pageSizes, setPageNumber, setScrollPosition, zoom]);
+
+  const createPresentationRestoreState = useCallback((): PdfViewerPresentationRestoreState => {
+    const viewport = viewportRef.current;
+    return {
+      pageNumber,
+      zoom,
+      fitMode,
+      toolMode,
+      scrollTop: viewport?.scrollTop ?? usePdfViewerStore.getState().getSession(fileId).scrollTop,
+      scrollLeft: viewport?.scrollLeft ?? usePdfViewerStore.getState().getSession(fileId).scrollLeft,
+    };
+  }, [fileId, fitMode, pageNumber, toolMode, zoom]);
+
+  const applyPresentationPageFit = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (
+      !viewport
+      || pageCount === 0
+      || !usePdfViewerStore.getState().getSession(fileId).isPresentationModeActive
+    ) {
+      return;
+    }
+
+    const baseSize = pageSizes[pageNumber] ?? PDF_VIEWER_DEFAULT_PAGE_SIZE;
+    const availableWidth = Math.max(1, viewport.clientWidth - PDF_VIEWER_VIEWPORT_PADDING_X);
+    const availableHeight = Math.max(1, viewport.clientHeight - PDF_VIEWER_VIEWPORT_PADDING_Y);
+    const nextZoom = Math.min(
+      availableWidth / Math.max(1, baseSize.width),
+      availableHeight / Math.max(1, baseSize.height),
+    );
+
+    if (Math.abs(nextZoom - zoom) > 0.01 || fitMode !== 'page') {
+      setZoom(fileId, nextZoom, 'page');
+    }
+
+    const targetPageNumber = pageNumber;
+    window.requestAnimationFrame(() => {
+      const session = usePdfViewerStore.getState().getSession(fileId);
+      if (session.isPresentationModeActive && session.pageNumber === targetPageNumber) {
+        scrollToPage(targetPageNumber);
+      }
+    });
+  }, [fileId, fitMode, pageCount, pageNumber, pageSizes, scrollToPage, setZoom, zoom]);
+
+  const handleFullscreenChange = useCallback(() => {
+    const pane = paneRef.current;
+    const isPaneFullscreen = Boolean(pane && document.fullscreenElement === pane);
+    if (isPaneFullscreen) {
+      const session = usePdfViewerStore.getState().getSession(fileId);
+      if (!session.isPresentationModeActive) {
+        const restoreState = presentationRestoreRef.current ?? createPresentationRestoreState();
+        presentationRestoreRef.current = restoreState;
+        enterPresentationMode(fileId, restoreState);
+      }
+      hideSelectionToolbar();
+      document.getSelection()?.removeAllRanges();
+      resetPresentationWheelState();
+      window.requestAnimationFrame(applyPresentationPageFit);
+      return;
+    }
+
+    const session = usePdfViewerStore.getState().getSession(fileId);
+    if (!session.isPresentationModeActive) {
+      presentationRestoreRef.current = null;
+      return;
+    }
+
+    const exitPageNumber = session.pageNumber;
+    exitPresentationMode(fileId, exitPageNumber, presentationRestoreRef.current);
+    presentationRestoreRef.current = null;
+    resetPresentationWheelState();
+    window.requestAnimationFrame(() => scrollToPage(exitPageNumber));
+  }, [
+    applyPresentationPageFit,
+    createPresentationRestoreState,
+    enterPresentationMode,
+    exitPresentationMode,
+    fileId,
+    hideSelectionToolbar,
+    resetPresentationWheelState,
+    scrollToPage,
+  ]);
+
+  useEffect(() => {
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [handleFullscreenChange]);
+
+  useEffect(() => {
+    if (!isPresentationModeActive) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(applyPresentationPageFit);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [applyPresentationPageFit, isPresentationModeActive]);
+
+  useEffect(() => () => {
+    const session = usePdfViewerStore.getState().getSession(fileId);
+    if (session.isPresentationModeActive) {
+      exitPresentationMode(fileId, session.pageNumber, presentationRestoreRef.current);
+    }
+    if (document.fullscreenElement === paneRef.current && typeof document.exitFullscreen === 'function') {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, [exitPresentationMode, fileId]);
 
   const resolveBookmarkPageNumber = useCallback(async (bookmark: PdfBookmark): Promise<number | null> => {
     if (!pdfDocument) {
@@ -2004,6 +2141,43 @@ export function PdfViewerPane({
   }, [isThumbnailRailVisible, pageCount, pageNumber]);
 
   const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    if (isPresentationModeActive) {
+      event.preventDefault();
+      const currentTime = Date.now();
+      if (
+        presentationWheelTimeStampRef.current > 0
+        && currentTime - presentationWheelTimeStampRef.current < PDF_PRESENTATION_WHEEL_COOLDOWN_MS
+      ) {
+        return;
+      }
+
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (
+        (presentationWheelDeltaRef.current > 0 && delta < 0)
+        || (presentationWheelDeltaRef.current < 0 && delta > 0)
+      ) {
+        presentationWheelDeltaRef.current = 0;
+      }
+
+      presentationWheelDeltaRef.current += delta;
+      if (Math.abs(presentationWheelDeltaRef.current) < PDF_PRESENTATION_WHEEL_THRESHOLD_PX) {
+        return;
+      }
+
+      const totalDelta = presentationWheelDeltaRef.current;
+      presentationWheelDeltaRef.current = 0;
+      if (totalDelta > 0) {
+        if (canGoNext) {
+          scrollToPage(pageNumber + 1);
+          presentationWheelTimeStampRef.current = currentTime;
+        }
+      } else if (canGoPrevious) {
+        scrollToPage(pageNumber - 1);
+        presentationWheelTimeStampRef.current = currentTime;
+      }
+      return;
+    }
+
     if (event.ctrlKey) {
       event.preventDefault();
       updateZoom(zoom + (event.deltaY < 0 ? PDF_VIEWER_ZOOM_STEP : -PDF_VIEWER_ZOOM_STEP), {
@@ -2023,24 +2197,44 @@ export function PdfViewerPane({
         scrollTop: viewport.scrollTop,
       });
     }
-  }, [fileId, setScrollPosition, updateZoom, zoom]);
+  }, [
+    canGoNext,
+    canGoPrevious,
+    fileId,
+    isPresentationModeActive,
+    pageNumber,
+    scrollToPage,
+    setScrollPosition,
+    updateZoom,
+    zoom,
+  ]);
 
   const handleViewportMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (isPresentationModeActive) {
+      hideSelectionToolbar();
+      return;
+    }
+
     const target = event.target instanceof Element ? event.target : null;
     isTextSelectingRef.current = toolMode === 'select' && Boolean(target?.closest('[data-pdf-text-layer="true"]'));
     hideSelectionToolbar();
-  }, [hideSelectionToolbar, toolMode]);
+  }, [hideSelectionToolbar, isPresentationModeActive, toolMode]);
 
   const handleViewportMouseUp = useCallback(() => {
+    if (isPresentationModeActive) {
+      isTextSelectingRef.current = false;
+      return;
+    }
+
     const wasTextSelecting = isTextSelectingRef.current;
     isTextSelectingRef.current = false;
     if (wasTextSelecting || getPdfSelectionInfo(viewportRef.current, zoom, { requireSinglePage: true })) {
       scheduleSelectionToolbarUpdate();
     }
-  }, [scheduleSelectionToolbarUpdate, zoom]);
+  }, [isPresentationModeActive, scheduleSelectionToolbarUpdate, zoom]);
 
   const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (toolMode !== 'hand' || event.button !== 0) {
+    if (isPresentationModeActive || toolMode !== 'hand' || event.button !== 0) {
       return;
     }
 
@@ -2055,7 +2249,7 @@ export function PdfViewerPane({
     };
     viewport.setPointerCapture?.(event.pointerId);
     setIsHandDragging(true);
-  }, [toolMode]);
+  }, [isPresentationModeActive, toolMode]);
 
   const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const dragState = handDragRef.current;
@@ -2084,12 +2278,109 @@ export function PdfViewerPane({
     }
   }, []);
 
+  const handlePresentationKeyCommand = useCallback((event: { key: string; preventDefault: () => void }) => {
+    switch (event.key) {
+      case 'Escape':
+        event.preventDefault();
+        {
+          const currentPageNumber = usePdfViewerStore.getState().getSession(fileId).pageNumber;
+          exitPresentationMode(fileId, currentPageNumber, presentationRestoreRef.current);
+        }
+        if (typeof document.exitFullscreen === 'function' && document.fullscreenElement === paneRef.current) {
+          void document.exitFullscreen().catch(() => undefined);
+        }
+        return true;
+      case 'ArrowRight':
+      case 'ArrowDown':
+      case 'PageDown':
+      case ' ':
+        event.preventDefault();
+        if (canGoNext) {
+          scrollToPage(pageNumber + 1);
+        }
+        return true;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+      case 'PageUp':
+        event.preventDefault();
+        if (canGoPrevious) {
+          scrollToPage(pageNumber - 1);
+        }
+        return true;
+      case 'Home':
+        event.preventDefault();
+        scrollToPage(1);
+        return true;
+      case 'End':
+        event.preventDefault();
+        scrollToPage(pageCount);
+        return true;
+      default:
+        return false;
+    }
+  }, [
+    canGoNext,
+    canGoPrevious,
+    exitPresentationMode,
+    fileId,
+    pageCount,
+    pageNumber,
+    scrollToPage,
+  ]);
+
+  useEffect(() => {
+    if (!isPresentationModeActive) {
+      return undefined;
+    }
+
+    const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      handlePresentationKeyCommand(event);
+    };
+    document.addEventListener('keydown', handleDocumentKeyDown);
+    return () => document.removeEventListener('keydown', handleDocumentKeyDown);
+  }, [handlePresentationKeyCommand, isPresentationModeActive]);
+
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (isPresentationModeActive) {
+      if (handlePresentationKeyCommand(event)) {
+        event.stopPropagation();
+      }
+      return;
+    }
+
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
       event.preventDefault();
       setSearchOpen(fileId, true);
     }
-  }, [fileId, setSearchOpen]);
+  }, [
+    fileId,
+    handlePresentationKeyCommand,
+    isPresentationModeActive,
+    setSearchOpen,
+  ]);
+
+  const handlePresentationViewportClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (!isPresentationModeActive) {
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-pdf-link="true"], button, input, textarea, [role="button"]')) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.shiftKey) {
+      if (canGoPrevious) {
+        scrollToPage(pageNumber - 1);
+      }
+      return;
+    }
+
+    if (canGoNext) {
+      scrollToPage(pageNumber + 1);
+    }
+  }, [canGoNext, canGoPrevious, isPresentationModeActive, pageNumber, scrollToPage]);
 
   const handleFirstPage = () => scrollToPage(1);
   const handlePreviousPage = () => scrollToPage(pageNumber - 1);
@@ -2102,6 +2393,34 @@ export function PdfViewerPane({
   };
   const handleRotateClockwise = () => handleRotate(90);
   const handleRotateCounterclockwise = () => handleRotate(-90);
+  const handlePresentationMode = () => {
+    if (isPresentationModeActive) {
+      const currentPageNumber = usePdfViewerStore.getState().getSession(fileId).pageNumber;
+      exitPresentationMode(fileId, currentPageNumber, presentationRestoreRef.current);
+      if (typeof document.exitFullscreen === 'function' && document.fullscreenElement === paneRef.current) {
+        void document.exitFullscreen().catch(() => undefined);
+      }
+      return;
+    }
+
+    const pane = paneRef.current;
+    if (!pane || !isFullscreenSupported || typeof pane.requestFullscreen !== 'function') {
+      return;
+    }
+
+    const restoreState = createPresentationRestoreState();
+    presentationRestoreRef.current = restoreState;
+    enterPresentationMode(fileId, restoreState);
+    hideSelectionToolbar();
+    setInfoPanelOpen(fileId, false);
+    document.getSelection()?.removeAllRanges();
+
+    void pane.requestFullscreen().catch(() => {
+      const restoreState = presentationRestoreRef.current;
+      presentationRestoreRef.current = null;
+      exitPresentationMode(fileId, undefined, restoreState);
+    });
+  };
   const handleZoomOut = () => updateZoom(zoom - PDF_VIEWER_ZOOM_STEP);
   const handleZoomIn = () => updateZoom(zoom + PDF_VIEWER_ZOOM_STEP);
   const handleResetZoom = () => updateZoom(PDF_VIEWER_DEFAULT_ZOOM);
@@ -2148,16 +2467,21 @@ export function PdfViewerPane({
     <div
       ref={paneRef}
       data-testid="pdf-viewer-pane"
-      className="relative flex min-h-0 flex-1 flex-col bg-ide-editor-bg text-ide-text"
+      data-pdf-presentation-mode={isPresentationModeActive ? 'true' : undefined}
+      className={[
+        'relative flex min-h-0 flex-1 flex-col text-ide-text',
+        isPresentationModeActive ? 'bg-black' : 'bg-ide-editor-bg',
+      ].join(' ')}
     >
-      <div
-        data-testid="pdf-viewer-toolbar"
-        className="flex h-9 shrink-0 items-center gap-1 border-b border-ide-border bg-ide-tab-bg px-2 text-[12px]"
-      >
-        <span className="min-w-0 flex-1 truncate text-ide-text-muted" title={fileName}>
-          {fileName}
-        </span>
-        <div className="flex items-center gap-1">
+      {!isPresentationModeActive && (
+        <div
+          data-testid="pdf-viewer-toolbar"
+          className="flex h-9 shrink-0 items-center gap-1 border-b border-ide-border bg-ide-tab-bg px-2 text-[12px]"
+        >
+          <span className="min-w-0 flex-1 truncate text-ide-text-muted" title={fileName}>
+            {fileName}
+          </span>
+          <div className="flex items-center gap-1">
           <TooltipIconButton content="Toggle Bookmarks">
             <button
               type="button"
@@ -2264,6 +2588,18 @@ export function PdfViewerPane({
               className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
             >
               <RotateCcw size={15} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Presentation Mode">
+            <button
+              type="button"
+              aria-label="Presentation Mode"
+              data-testid="pdf-viewer-presentation-mode"
+              disabled={isLoading || !pdfDocument || !isFullscreenSupported}
+              onClick={handlePresentationMode}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <Presentation size={15} />
             </button>
           </TooltipIconButton>
           <div className="mx-1 h-4 w-px bg-ide-border" />
@@ -2470,9 +2806,10 @@ export function PdfViewerPane({
               <Search size={14} />
             </button>
           </TooltipIconButton>
+          </div>
         </div>
-      </div>
-      {isSearchOpen && (
+      )}
+      {!isPresentationModeActive && isSearchOpen && (
         <div
           data-testid="pdf-viewer-search-bar"
           className="flex h-9 shrink-0 items-center gap-2 border-b border-ide-border bg-ide-editor-bg px-2 text-[12px]"
@@ -2556,7 +2893,7 @@ export function PdfViewerPane({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          {pdfDocument && isBookmarkTreeVisible && (
+          {pdfDocument && !isPresentationModeActive && isBookmarkTreeVisible && (
             <PdfBookmarkTree
               bookmarks={bookmarks}
               expandedBookmarkIds={expandedBookmarkIds}
@@ -2570,6 +2907,7 @@ export function PdfViewerPane({
             tabIndex={0}
             onKeyDown={handleKeyDown}
             onKeyUp={scheduleSelectionToolbarUpdate}
+            onClick={handlePresentationViewportClick}
             onMouseDown={handleViewportMouseDown}
             onMouseUp={handleViewportMouseUp}
             onPointerDown={handlePointerDown}
@@ -2579,11 +2917,12 @@ export function PdfViewerPane({
             onScroll={handleViewportScroll}
             onWheel={handleWheel}
             className={[
-              'min-h-0 flex-1 overflow-auto bg-ide-editor-bg focus:outline-none',
-              toolMode === 'hand' ? (isHandDragging ? 'cursor-grabbing' : 'cursor-grab') : '',
+              'min-h-0 flex-1 overflow-auto focus:outline-none',
+              isPresentationModeActive ? 'bg-black' : 'bg-ide-editor-bg',
+              !isPresentationModeActive && toolMode === 'hand' ? (isHandDragging ? 'cursor-grabbing' : 'cursor-grab') : '',
             ].join(' ')}
           >
-            <div className="min-w-full px-6 py-6">
+            <div className={isPresentationModeActive ? 'flex min-h-full min-w-full items-center justify-center px-6 py-6' : 'min-w-full px-6 py-6'}>
               <div className="relative mx-auto w-max max-w-none">
                 {isLoading && (
                   <div
@@ -2601,8 +2940,9 @@ export function PdfViewerPane({
                     {renderError}
                   </div>
                 )}
-                {pdfDocument && pageNumbers.map((currentPageNumber) => {
-                  const shouldRender = currentPageNumber >= renderedPageRange.start && currentPageNumber <= renderedPageRange.end;
+                {pdfDocument && visiblePageNumbers.map((currentPageNumber) => {
+                  const shouldRender = isPresentationModeActive
+                    || (currentPageNumber >= renderedPageRange.start && currentPageNumber <= renderedPageRange.end);
                   const pageSize = getPageSize(pageSizes, currentPageNumber, zoom);
                   return (
                     <div
@@ -2642,7 +2982,7 @@ export function PdfViewerPane({
                           rotation={rotation}
                           shouldRender={shouldRender}
                           pageSize={pageSize}
-                          toolMode={toolMode}
+                          toolMode={effectiveToolMode}
                           searchMatches={searchMatches.filter((match) => match.pageNumber === currentPageNumber)}
                           activeSearchMatchIndex={activeSearchMatchIndex}
                           onTextItemsChange={handleTextItemsChange}
@@ -2664,7 +3004,7 @@ export function PdfViewerPane({
               </div>
             </div>
           </div>
-          {pdfDocument && pageCount > 0 && isThumbnailRailVisible && (
+          {pdfDocument && pageCount > 0 && !isPresentationModeActive && isThumbnailRailVisible && (
             <div
               ref={thumbnailRailRef}
               data-testid="pdf-viewer-thumbnail-rail"
@@ -2691,7 +3031,7 @@ export function PdfViewerPane({
           )}
         </div>
       )}
-      {selectionToolbar && (
+      {!isPresentationModeActive && selectionToolbar && (
         <PdfSelectionToolbar
           state={selectionToolbar}
           onHighlight={handleSelectionToolbarHighlight}

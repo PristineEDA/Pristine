@@ -19,6 +19,8 @@ const defaultSession = {
   searchQuery: '',
   isSearchOpen: false,
   isInfoPanelOpen: false,
+  isPresentationModeActive: false,
+  presentationRestoreState: null,
   activeSearchMatchIndex: 0,
   isBookmarkTreeVisible: true,
   isThumbnailRailVisible: true,
@@ -146,6 +148,59 @@ describe('usePdfViewerStore', () => {
     });
   });
 
+  it('stores and restores presentation mode state per PDF file', () => {
+    usePdfViewerStore.getState().setPageNumber('docs/spec.pdf', 4, 12);
+    usePdfViewerStore.getState().setZoom('docs/spec.pdf', 1.5);
+    usePdfViewerStore.getState().setFitMode('docs/spec.pdf', 'width');
+    usePdfViewerStore.getState().setToolMode('docs/spec.pdf', 'hand');
+    usePdfViewerStore.getState().setScrollPosition('docs/spec.pdf', { scrollTop: 320, scrollLeft: 28 });
+
+    usePdfViewerStore.getState().enterPresentationMode('docs/spec.pdf', {
+      pageNumber: 4,
+      zoom: 1.5,
+      fitMode: 'width',
+      toolMode: 'hand',
+      scrollTop: 320,
+      scrollLeft: 28,
+    });
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toEqual({
+      ...defaultSession,
+      pageNumber: 4,
+      zoom: 1.5,
+      fitMode: 'width',
+      toolMode: 'hand',
+      scrollTop: 320,
+      scrollLeft: 28,
+      isPresentationModeActive: true,
+      presentationRestoreState: {
+        pageNumber: 4,
+        zoom: 1.5,
+        fitMode: 'width',
+        toolMode: 'hand',
+        scrollTop: 320,
+        scrollLeft: 28,
+      },
+    });
+    expect(usePdfViewerStore.getState().getSession('docs/other.pdf')).toEqual(defaultSession);
+
+    usePdfViewerStore.getState().setPageNumber('docs/spec.pdf', 7, 12);
+    usePdfViewerStore.getState().setZoom('docs/spec.pdf', 0.75, 'page');
+    usePdfViewerStore.getState().exitPresentationMode('docs/spec.pdf', 7);
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toEqual({
+      ...defaultSession,
+      pageNumber: 7,
+      zoom: 1.5,
+      fitMode: 'width',
+      toolMode: 'hand',
+      scrollTop: 320,
+      scrollLeft: 28,
+      isPresentationModeActive: false,
+      presentationRestoreState: null,
+    });
+  });
+
   it('normalizes clockwise and counterclockwise rotation per PDF file', () => {
     usePdfViewerStore.getState().rotate('docs/spec.pdf', 90);
     usePdfViewerStore.getState().rotate('docs/spec.pdf', 90);
@@ -220,6 +275,14 @@ describe('usePdfViewerStore', () => {
     usePdfViewerStore.getState().setToolMode('docs/spec.pdf', 'hand');
     usePdfViewerStore.getState().setSearchOpen('docs/spec.pdf', true);
     usePdfViewerStore.getState().setInfoPanelOpen('docs/spec.pdf', true);
+    usePdfViewerStore.getState().enterPresentationMode('docs/spec.pdf', {
+      pageNumber: 3,
+      zoom: 1.5,
+      fitMode: 'custom',
+      toolMode: 'hand',
+      scrollTop: 120,
+      scrollLeft: 24,
+    });
     usePdfViewerStore.getState().setScrollPosition('docs/spec.pdf', { scrollTop: 120, scrollLeft: 24 });
     usePdfViewerStore.getState().setZoom('docs/other.pdf', 1.25);
 

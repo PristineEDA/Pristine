@@ -33,6 +33,15 @@ export interface CreatePdfHighlightAnnotationInput {
   quote?: string;
 }
 
+export interface PdfViewerPresentationRestoreState {
+  pageNumber: number;
+  zoom: number;
+  fitMode: PdfViewerFitMode;
+  toolMode: PdfViewerToolMode;
+  scrollTop: number;
+  scrollLeft: number;
+}
+
 export interface PdfViewerSession {
   pageNumber: number;
   zoom: number;
@@ -45,6 +54,8 @@ export interface PdfViewerSession {
   searchQuery: string;
   isSearchOpen: boolean;
   isInfoPanelOpen: boolean;
+  isPresentationModeActive: boolean;
+  presentationRestoreState: PdfViewerPresentationRestoreState | null;
   activeSearchMatchIndex: number;
   isBookmarkTreeVisible: boolean;
   isThumbnailRailVisible: boolean;
@@ -61,6 +72,12 @@ interface PdfViewerStoreState {
   setZoom: (fileId: string, zoom: number, fitMode?: PdfViewerFitMode) => void;
   setRotation: (fileId: string, rotation: number) => void;
   rotate: (fileId: string, delta: number) => void;
+  enterPresentationMode: (fileId: string, restoreState: PdfViewerPresentationRestoreState) => void;
+  exitPresentationMode: (
+    fileId: string,
+    pageNumber?: number,
+    restoreState?: PdfViewerPresentationRestoreState | null,
+  ) => void;
   setFitMode: (fileId: string, fitMode: PdfViewerFitMode) => void;
   setToolMode: (fileId: string, toolMode: PdfViewerToolMode) => void;
   setPageToneMode: (fileId: string, mode: PdfViewerPageToneMode) => void;
@@ -171,6 +188,8 @@ const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   searchQuery: '',
   isSearchOpen: false,
   isInfoPanelOpen: false,
+  isPresentationModeActive: false,
+  presentationRestoreState: null,
   activeSearchMatchIndex: 0,
   isBookmarkTreeVisible: true,
   isThumbnailRailVisible: true,
@@ -312,6 +331,66 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           [fileId]: {
             ...current,
             rotation: nextRotation,
+          },
+        },
+      };
+    });
+  },
+  enterPresentationMode: (fileId, restoreState) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            isPresentationModeActive: true,
+            presentationRestoreState: {
+              pageNumber: normalizePageNumber(restoreState.pageNumber),
+              zoom: normalizeZoom(restoreState.zoom),
+              fitMode: normalizeFitMode(restoreState.fitMode),
+              toolMode: normalizeToolMode(restoreState.toolMode),
+              scrollTop: Math.max(0, Number.isFinite(restoreState.scrollTop) ? restoreState.scrollTop : 0),
+              scrollLeft: Math.max(0, Number.isFinite(restoreState.scrollLeft) ? restoreState.scrollLeft : 0),
+            },
+          },
+        },
+      };
+    });
+  },
+  exitPresentationMode: (fileId, pageNumber, restoreStateOverride) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const restoreState = current.presentationRestoreState ?? restoreStateOverride ?? null;
+      const nextPageNumber = pageNumber === undefined
+        ? current.pageNumber
+        : normalizePageNumber(pageNumber);
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            ...(restoreState
+              ? {
+                zoom: restoreState.zoom,
+                fitMode: restoreState.fitMode,
+                toolMode: restoreState.toolMode,
+                scrollTop: restoreState.scrollTop,
+                scrollLeft: restoreState.scrollLeft,
+              }
+              : {}),
+            pageNumber: nextPageNumber,
+            isPresentationModeActive: false,
+            presentationRestoreState: null,
           },
         },
       };

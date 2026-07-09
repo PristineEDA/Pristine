@@ -137,9 +137,42 @@ function mockPdfSelection({
   return { removeAllRanges, selection };
 }
 
+let mockedFullscreenElement: Element | null = null;
+const requestFullscreenMock = vi.fn(function requestFullscreen(this: Element) {
+  mockedFullscreenElement = this;
+  document.dispatchEvent(new Event('fullscreenchange'));
+  return Promise.resolve();
+});
+const exitFullscreenMock = vi.fn(() => {
+  mockedFullscreenElement = null;
+  document.dispatchEvent(new Event('fullscreenchange'));
+  return Promise.resolve();
+});
+
 describe('PdfViewerPane', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedFullscreenElement = null;
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => mockedFullscreenElement,
+    });
+    Object.defineProperty(document, 'fullscreenEnabled', {
+      configurable: true,
+      value: true,
+    });
+    Object.defineProperty(document.documentElement, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreenMock,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreenMock,
+    });
+    Object.defineProperty(document, 'exitFullscreen', {
+      configurable: true,
+      value: exitFullscreenMock,
+    });
     usePdfViewerStore.getState().resetPdfViewerStoreForTests();
     vi.mocked(window.electronAPI!.fs.readFileBinary).mockResolvedValue(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
   });
@@ -551,6 +584,79 @@ describe('PdfViewerPane', () => {
     fireEvent.click(screen.getByTestId('pdf-viewer-reset-zoom'));
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-zoom-indicator')).toHaveTextContent('100%'));
+  });
+
+  it('enters presentation mode, navigates pages, and restores the previous viewer session on exit', async () => {
+    const pdfDocument = createMockPdfDocument(3);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    const viewport = await screen.findByTestId('pdf-viewer-scroll-viewport');
+    setElementSize(viewport, 900, 700);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+
+    const presentationButton = screen.getByTestId('pdf-viewer-presentation-mode');
+    await waitFor(() => expect(presentationButton).toBeEnabled());
+    expect(presentationButton).toHaveAccessibleName('Presentation Mode');
+    expect(presentationButton).toHaveTextContent('');
+
+    fireEvent.click(presentationButton);
+
+    expect(requestFullscreenMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-pane')).toHaveAttribute('data-pdf-presentation-mode', 'true'));
+    expect(screen.queryByTestId('pdf-viewer-toolbar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-bookmark-tree')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-thumbnail-rail')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-search-input')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-2')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('pdf-viewer-page-1')).getByTestId('pdf-viewer-text-layer-1')).toHaveClass('pointer-events-none');
+
+    fireEvent.click(viewport);
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-1')).not.toBeInTheDocument();
+
+    fireEvent.click(viewport, { shiftKey: true });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(1));
+
+    fireEvent.keyDown(viewport, { key: 'End' });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(3));
+
+    fireEvent.keyDown(viewport, { key: 'Home' });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(1));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument());
+
+    fireEvent.wheel(viewport, {
+      deltaY: 120,
+    });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
+      isPresentationModeActive: true,
+      presentationRestoreState: expect.objectContaining({
+        zoom: 1,
+        fitMode: 'custom',
+        toolMode: 'select',
+      }),
+    });
+
+    fireEvent.keyDown(viewport, { key: 'Escape' });
+
+    expect(exitFullscreenMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-pane')).not.toHaveAttribute('data-pdf-presentation-mode'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-toolbar')).toBeInTheDocument());
+    expect(screen.getByTestId('pdf-viewer-bookmark-tree')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-thumbnail-rail')).toBeInTheDocument();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
+      pageNumber: 2,
+      zoom: 1,
+      fitMode: 'custom',
+      toolMode: 'select',
+      scrollLeft: 0,
+      isPresentationModeActive: false,
+      presentationRestoreState: null,
+    });
   });
 
   it('supports width/page fit and returns to custom mode on manual zoom', async () => {
