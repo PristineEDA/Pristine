@@ -17,6 +17,8 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
   Contrast,
   Hand,
   Highlighter,
@@ -30,6 +32,7 @@ import {
   PanelRight,
   PanelTop,
   RotateCcw,
+  RotateCw,
   ScanText,
   Search,
   TextCursorInput,
@@ -49,6 +52,7 @@ import {
   type PdfHighlightRect,
   type PdfViewerFitMode,
   type PdfViewerPageToneMode,
+  type PdfViewerRotation,
   type PdfViewerToolMode,
   usePdfViewerStore,
 } from '../../../pdf/usePdfViewerStore';
@@ -182,6 +186,7 @@ interface PdfPageCanvasProps {
   pageNumber: number;
   pdfDocument: PDFDocumentProxy;
   zoom: number;
+  rotation: PdfViewerRotation;
   shouldRender: boolean;
   pageSize: PdfPageSize;
   pageToneMode: PdfViewerPageToneMode;
@@ -193,6 +198,7 @@ interface PdfPageTextLayerProps {
   pageNumber: number;
   pdfDocument: PDFDocumentProxy;
   zoom: number;
+  rotation: PdfViewerRotation;
   shouldRender: boolean;
   pageSize: PdfPageSize;
   toolMode: PdfViewerToolMode;
@@ -205,6 +211,7 @@ interface PdfPageLinkLayerProps {
   pageNumber: number;
   pdfDocument: PDFDocumentProxy;
   zoom: number;
+  rotation: PdfViewerRotation;
   shouldRender: boolean;
   pageSize: PdfPageSize;
   textItems: PdfTextItem[];
@@ -221,6 +228,7 @@ interface PdfPageHighlightLayerProps {
 interface PdfThumbnailCanvasProps {
   pageNumber: number;
   pdfDocument: PDFDocumentProxy;
+  rotation: PdfViewerRotation;
   isActive: boolean;
   shouldRender: boolean;
   pageToneMode: PdfViewerPageToneMode;
@@ -707,6 +715,7 @@ function PdfPageCanvas({
   pageNumber,
   pdfDocument,
   zoom,
+  rotation,
   shouldRender,
   pageSize,
   pageToneMode,
@@ -739,7 +748,7 @@ function PdfPageCanvas({
         }
 
         const outputScale = Math.max(window.devicePixelRatio || 1, 1);
-        const viewport = page.getViewport({ scale: zoom });
+        const viewport = page.getViewport({ scale: zoom, rotation });
         onPageSizeChange(pageNumber, {
           width: viewport.width / zoom,
           height: viewport.height / zoom,
@@ -762,7 +771,7 @@ function PdfPageCanvas({
       cancelled = true;
       renderTask?.cancel?.();
     };
-  }, [onPageSizeChange, onRenderError, pageNumber, pdfDocument, shouldRender, zoom]);
+  }, [onPageSizeChange, onRenderError, pageNumber, pdfDocument, rotation, shouldRender, zoom]);
 
   const pageStyle: CSSProperties = {
     height: pageSize.height,
@@ -800,6 +809,7 @@ function PdfPageTextLayer({
   pageNumber,
   pdfDocument,
   zoom,
+  rotation,
   shouldRender,
   pageSize,
   toolMode,
@@ -831,7 +841,7 @@ function PdfPageTextLayer({
           return [];
         }
 
-        const viewport = page.getViewport({ scale: zoom });
+        const viewport = page.getViewport({ scale: zoom, rotation });
         const textContent = await page.getTextContent();
         const viewportTransform = normalizeTransform(
           viewport.transform,
@@ -873,7 +883,7 @@ function PdfPageTextLayer({
     return () => {
       cancelled = true;
     };
-  }, [onTextItemsChange, pageNumber, pdfDocument, shouldRender, zoom]);
+  }, [onTextItemsChange, pageNumber, pdfDocument, rotation, shouldRender, zoom]);
 
   if (!shouldRender || textItems.length === 0) {
     return null;
@@ -958,6 +968,7 @@ function PdfPageLinkLayer({
   pageNumber,
   pdfDocument,
   zoom,
+  rotation,
   shouldRender,
   pageSize,
   textItems,
@@ -982,7 +993,7 @@ function PdfPageLinkLayer({
           return [];
         }
 
-        const viewport = page.getViewport({ scale: zoom });
+        const viewport = page.getViewport({ scale: zoom, rotation });
         const annotations = await getAnnotations.call(page, { intent: 'display' });
         return annotations
           .map((annotation, index) => {
@@ -1014,7 +1025,7 @@ function PdfPageLinkLayer({
     return () => {
       cancelled = true;
     };
-  }, [pageNumber, pdfDocument, shouldRender, zoom]);
+  }, [pageNumber, pdfDocument, rotation, shouldRender, zoom]);
 
   if (!shouldRender) {
     return null;
@@ -1073,6 +1084,7 @@ function PdfPageLinkLayer({
 function PdfThumbnailCanvas({
   pageNumber,
   pdfDocument,
+  rotation,
   isActive,
   shouldRender,
   pageToneMode,
@@ -1101,9 +1113,9 @@ function PdfThumbnailCanvas({
           return undefined;
         }
 
-        const baseViewport = page.getViewport({ scale: 1 });
+        const baseViewport = page.getViewport({ scale: 1, rotation });
         const scale = PDF_VIEWER_THUMBNAIL_WIDTH_PX / Math.max(1, baseViewport.width);
-        const viewport = page.getViewport({ scale });
+        const viewport = page.getViewport({ scale, rotation });
         const outputScale = Math.max(window.devicePixelRatio || 1, 1);
         setThumbnailSize({ width: viewport.width, height: viewport.height });
         canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
@@ -1120,7 +1132,7 @@ function PdfThumbnailCanvas({
       cancelled = true;
       renderTask?.cancel?.();
     };
-  }, [pageNumber, pdfDocument, shouldRender]);
+  }, [pageNumber, pdfDocument, rotation, shouldRender]);
 
   return (
     <button
@@ -1431,6 +1443,7 @@ export function PdfViewerPane({
     isThumbnailRailVisible,
     pageNumber,
     pageToneMode,
+    rotation,
     searchQuery,
     toolMode,
     zoom,
@@ -1443,6 +1456,7 @@ export function PdfViewerPane({
   const addHighlightAnnotation = usePdfViewerStore((state) => state.addHighlightAnnotation);
   const setPageNumber = usePdfViewerStore((state) => state.setPageNumber);
   const setPageNumberFromViewport = usePdfViewerStore((state) => state.setPageNumberFromViewport);
+  const rotate = usePdfViewerStore((state) => state.rotate);
   const setScrollPosition = usePdfViewerStore((state) => state.setScrollPosition);
   const setSearchOpen = usePdfViewerStore((state) => state.setSearchOpen);
   const setInfoPanelOpen = usePdfViewerStore((state) => state.setInfoPanelOpen);
@@ -1452,6 +1466,8 @@ export function PdfViewerPane({
   const setZoom = usePdfViewerStore((state) => state.setZoom);
   const canGoPrevious = pageNumber > 1;
   const canGoNext = pageCount > 0 && pageNumber < pageCount;
+  const canGoFirst = canGoPrevious;
+  const canGoLast = canGoNext;
   const pageNumbers = useMemo(
     () => Array.from({ length: pageCount }, (_, index) => index + 1),
     [pageCount],
@@ -1558,6 +1574,12 @@ export function PdfViewerPane({
     setIsPdfDocumentInfoLoading(false);
     hideSelectionToolbar();
   }, [fileId, hideSelectionToolbar, reloadToken]);
+
+  useEffect(() => {
+    setPageSizes({});
+    setPageTextItems({});
+    hideSelectionToolbar();
+  }, [fileId, hideSelectionToolbar, rotation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2069,8 +2091,17 @@ export function PdfViewerPane({
     }
   }, [fileId, setSearchOpen]);
 
+  const handleFirstPage = () => scrollToPage(1);
   const handlePreviousPage = () => scrollToPage(pageNumber - 1);
   const handleNextPage = () => scrollToPage(pageNumber + 1);
+  const handleLastPage = () => scrollToPage(pageCount);
+  const handleRotate = (delta: number) => {
+    hideSelectionToolbar();
+    rotate(fileId, delta);
+    window.requestAnimationFrame(() => scrollToPage(pageNumber));
+  };
+  const handleRotateClockwise = () => handleRotate(90);
+  const handleRotateCounterclockwise = () => handleRotate(-90);
   const handleZoomOut = () => updateZoom(zoom - PDF_VIEWER_ZOOM_STEP);
   const handleZoomIn = () => updateZoom(zoom + PDF_VIEWER_ZOOM_STEP);
   const handleResetZoom = () => updateZoom(PDF_VIEWER_DEFAULT_ZOOM);
@@ -2160,6 +2191,18 @@ export function PdfViewerPane({
             </button>
           </TooltipIconButton>
           <div className="mx-1 h-4 w-px bg-ide-border" />
+          <TooltipIconButton content="Go to First Page">
+            <button
+              type="button"
+              aria-label="Go to First Page"
+              data-testid="pdf-viewer-first-page"
+              disabled={!canGoFirst || isLoading}
+              onClick={handleFirstPage}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <ChevronsUp size={15} />
+            </button>
+          </TooltipIconButton>
           <TooltipIconButton content="Previous Page">
             <button
               type="button"
@@ -2185,6 +2228,42 @@ export function PdfViewerPane({
               className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
             >
               <ChevronRight size={15} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Go to Last Page">
+            <button
+              type="button"
+              aria-label="Go to Last Page"
+              data-testid="pdf-viewer-last-page"
+              disabled={!canGoLast || isLoading}
+              onClick={handleLastPage}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <ChevronsDown size={15} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Rotate Clockwise">
+            <button
+              type="button"
+              aria-label="Rotate Clockwise"
+              data-testid="pdf-viewer-rotate-clockwise"
+              disabled={isLoading || !pdfDocument}
+              onClick={handleRotateClockwise}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <RotateCw size={15} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Rotate Counterclockwise">
+            <button
+              type="button"
+              aria-label="Rotate Counterclockwise"
+              data-testid="pdf-viewer-rotate-counterclockwise"
+              disabled={isLoading || !pdfDocument}
+              onClick={handleRotateCounterclockwise}
+              className="rounded p-1 text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40"
+            >
+              <RotateCcw size={15} />
             </button>
           </TooltipIconButton>
           <div className="mx-1 h-4 w-px bg-ide-border" />
@@ -2543,6 +2622,7 @@ export function PdfViewerPane({
                           pageNumber={currentPageNumber}
                           pdfDocument={pdfDocument}
                           zoom={zoom}
+                          rotation={rotation}
                           shouldRender={shouldRender}
                           pageSize={pageSize}
                           pageToneMode={pageToneMode}
@@ -2559,6 +2639,7 @@ export function PdfViewerPane({
                           pageNumber={currentPageNumber}
                           pdfDocument={pdfDocument}
                           zoom={zoom}
+                          rotation={rotation}
                           shouldRender={shouldRender}
                           pageSize={pageSize}
                           toolMode={toolMode}
@@ -2570,6 +2651,7 @@ export function PdfViewerPane({
                           pageNumber={currentPageNumber}
                           pdfDocument={pdfDocument}
                           zoom={zoom}
+                          rotation={rotation}
                           shouldRender={shouldRender}
                           pageSize={pageSize}
                           textItems={pageTextItems[currentPageNumber] ?? []}
@@ -2594,6 +2676,7 @@ export function PdfViewerPane({
                     key={currentPageNumber}
                     pageNumber={currentPageNumber}
                     pdfDocument={pdfDocument}
+                    rotation={rotation}
                     isActive={currentPageNumber === pageNumber}
                     shouldRender={
                       currentPageNumber >= renderedThumbnailRange.start

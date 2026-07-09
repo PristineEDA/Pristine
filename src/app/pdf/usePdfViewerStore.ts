@@ -9,6 +9,7 @@ export const PDF_VIEWER_ZOOM_STEP = 0.25;
 export type PdfViewerFitMode = 'custom' | 'width' | 'page';
 export type PdfViewerToolMode = 'select' | 'hand';
 export type PdfViewerPageToneMode = 'auto' | 'original' | 'soft';
+export type PdfViewerRotation = 0 | 90 | 180 | 270;
 
 export interface PdfHighlightRect {
   left: number;
@@ -35,6 +36,7 @@ export interface CreatePdfHighlightAnnotationInput {
 export interface PdfViewerSession {
   pageNumber: number;
   zoom: number;
+  rotation: PdfViewerRotation;
   fitMode: PdfViewerFitMode;
   toolMode: PdfViewerToolMode;
   pageToneMode: PdfViewerPageToneMode;
@@ -57,6 +59,8 @@ interface PdfViewerStoreState {
   setPageNumberFromViewport: (fileId: string, pageNumber: number, pageCount?: number) => void;
   setScrollPosition: (fileId: string, position: Partial<Pick<PdfViewerSession, 'scrollTop' | 'scrollLeft'>>) => void;
   setZoom: (fileId: string, zoom: number, fitMode?: PdfViewerFitMode) => void;
+  setRotation: (fileId: string, rotation: number) => void;
+  rotate: (fileId: string, delta: number) => void;
   setFitMode: (fileId: string, fitMode: PdfViewerFitMode) => void;
   setToolMode: (fileId: string, toolMode: PdfViewerToolMode) => void;
   setPageToneMode: (fileId: string, mode: PdfViewerPageToneMode) => void;
@@ -89,6 +93,15 @@ function normalizePageNumber(pageNumber: number, pageCount?: number): number {
 
 function normalizeZoom(zoom: number): number {
   return Math.round(clampNumber(zoom, PDF_VIEWER_MIN_ZOOM, PDF_VIEWER_MAX_ZOOM) * 100) / 100;
+}
+
+function normalizeRotation(rotation: number): PdfViewerRotation {
+  if (!Number.isFinite(rotation)) {
+    return 0;
+  }
+
+  const normalized = ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
+  return normalized as PdfViewerRotation;
 }
 
 function normalizeFitMode(fitMode: PdfViewerFitMode): PdfViewerFitMode {
@@ -149,6 +162,7 @@ function createHighlightId(): string {
 const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   pageNumber: PDF_VIEWER_DEFAULT_PAGE_NUMBER,
   zoom: PDF_VIEWER_DEFAULT_ZOOM,
+  rotation: 0,
   fitMode: 'custom',
   toolMode: 'select',
   pageToneMode: 'auto',
@@ -252,6 +266,52 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
             ...current,
             zoom: normalizeZoom(zoom),
             fitMode: normalizeFitMode(fitMode),
+          },
+        },
+      };
+    });
+  },
+  setRotation: (fileId, rotation) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const nextRotation = normalizeRotation(rotation);
+      if (current.rotation === nextRotation) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            rotation: nextRotation,
+          },
+        },
+      };
+    });
+  },
+  rotate: (fileId, delta) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const nextRotation = normalizeRotation(current.rotation + delta);
+      if (current.rotation === nextRotation) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            rotation: nextRotation,
           },
         },
       };

@@ -33,6 +33,27 @@ function createMockPdfDocument(
     promise: Promise.resolve(),
     cancel: cancelRenderTask,
   }));
+  const getViewport = vi.fn(({ scale, rotation = 0 }: { scale: number; rotation?: number }) => {
+    const normalizedRotation = ((rotation % 360) + 360) % 360;
+    const isRotated = normalizedRotation === 90 || normalizedRotation === 270;
+    const width = (isRotated ? 800 : 600) * scale;
+    const height = (isRotated ? 600 : 800) * scale;
+    const pageHeight = isRotated ? 600 : 800;
+    return {
+      width,
+      height,
+      transform: [scale, 0, 0, -scale, 0, height],
+      convertToViewportRectangle: (rect: number[]) => {
+        const [x1 = 0, y1 = 0, x2 = 0, y2 = 0] = rect;
+        return [
+          x1 * scale,
+          (pageHeight - y1) * scale,
+          x2 * scale,
+          (pageHeight - y2) * scale,
+        ];
+      },
+    };
+  });
   const getMetadata = vi.fn(async () => ({
     info: options.info ?? {},
     metadata: {
@@ -48,20 +69,7 @@ function createMockPdfDocument(
         height: 12,
       })),
     })),
-    getViewport: ({ scale }: { scale: number }) => ({
-      width: 600 * scale,
-      height: 800 * scale,
-      transform: [scale, 0, 0, -scale, 0, 800 * scale],
-      convertToViewportRectangle: (rect: number[]) => {
-        const [x1 = 0, y1 = 0, x2 = 0, y2 = 0] = rect;
-        return [
-          x1 * scale,
-          (800 - y1) * scale,
-          x2 * scale,
-          (800 - y2) * scale,
-        ];
-      },
-    }),
+    getViewport,
     getAnnotations: vi.fn(async () => options.annotations?.[pageNumber] ?? []),
     render,
   }));
@@ -71,6 +79,7 @@ function createMockPdfDocument(
     destroy: vi.fn(),
     getDestination: vi.fn(async (name: string) => (name === 'chapter-2' ? [{ num: 2, gen: 0 }] : null)),
     getMetadata,
+    getViewport,
     getOutline: vi.fn(async () => options.outline ?? []),
     getPage,
     getPageIndex: vi.fn(async () => 1),
@@ -497,6 +506,21 @@ describe('PdfViewerPane', () => {
     render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+    expect(screen.getByTestId('pdf-viewer-first-page')).toBeDisabled();
+    expect(screen.getByTestId('pdf-viewer-last-page')).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-last-page'));
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('3 / 3'));
+    expect(screen.getByTestId('pdf-viewer-last-page')).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-first-page'));
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+    expect(screen.getByLabelText('Go to First Page')).toBeInTheDocument();
+    expect(screen.getByLabelText('Go to Last Page')).toBeInTheDocument();
+    expect(screen.getByLabelText('Rotate Clockwise')).toBeInTheDocument();
+    expect(screen.getByLabelText('Rotate Counterclockwise')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('pdf-viewer-next-page'));
 
@@ -505,6 +529,18 @@ describe('PdfViewerPane', () => {
 
     fireEvent.click(screen.getByTestId('pdf-viewer-thumbnail-3'));
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('3 / 3'));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-rotate-clockwise'));
+
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').rotation).toBe(90));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-canvas-3')).toHaveStyle({ width: '800px', height: '600px' }));
+    await waitFor(() => expect(pdfDocument.getViewport).toHaveBeenCalledWith(expect.objectContaining({ rotation: 90 })));
+    expect(screen.getByTestId('pdf-viewer-thumbnail-3')).toHaveAttribute('aria-current', 'page');
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-rotate-counterclockwise'));
+
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').rotation).toBe(0));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-canvas-3')).toHaveStyle({ width: '600px', height: '800px' }));
 
     fireEvent.click(screen.getByTestId('pdf-viewer-zoom-in'));
 

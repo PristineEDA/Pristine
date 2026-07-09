@@ -4804,6 +4804,35 @@ test('file tree opens PDF files in the center editor tab', async () => {
     timeout: UI_READY_TIMEOUT_MS,
   }).toBeGreaterThan(0);
   const initialCanvasWidth = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
+  const initialCanvasHeight = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('height') ?? 0));
+
+  await window.getByTestId('pdf-viewer-last-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-thumbnail-2')).toHaveAttribute('aria-current', 'page');
+
+  await window.getByTestId('pdf-viewer-first-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  await window.getByTestId('pdf-viewer-rotate-clockwise').click();
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasHeight);
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('height') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasWidth);
+  await expect(window.getByTestId('pdf-viewer-thumbnail-1')).toHaveAttribute('aria-current', 'page');
+
+  await window.getByTestId('pdf-viewer-rotate-counterclockwise').click();
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasWidth);
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('height') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasHeight);
 
   await window.getByTestId('pdf-viewer-info-menu').click();
   await expect(window.getByTestId('pdf-viewer-info-popover')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
