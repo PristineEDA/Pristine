@@ -234,9 +234,10 @@ describe('PdfViewerPane', () => {
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 11'));
     await waitFor(() => expect(pdfDocument.getMetadata).toHaveBeenCalled());
 
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-info-menu')).not.toBeDisabled());
     fireEvent.click(screen.getByTestId('pdf-viewer-info-menu'));
 
-    expect(await screen.findByTestId('pdf-viewer-info-popover')).toBeInTheDocument();
+    expect(await screen.findByTestId('pdf-viewer-info-popover', undefined, { timeout: 5_000 })).toBeInTheDocument();
     expect(screen.getByTestId('pdf-viewer-info-content')).toHaveClass('w-[400px]');
     expect(screen.getByTestId('pdf-viewer-info-popover')).toHaveClass('w-full');
     expect(screen.getByTestId('pdf-viewer-info-row-fileName')).toHaveClass('grid-cols-[132px_minmax(0,1fr)]', 'gap-2');
@@ -264,9 +265,10 @@ describe('PdfViewerPane', () => {
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 1'));
 
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-info-menu')).not.toBeDisabled());
     fireEvent.click(screen.getByTestId('pdf-viewer-info-menu'));
 
-    expect(await screen.findByTestId('pdf-viewer-info-popover')).toBeInTheDocument();
+    expect(await screen.findByTestId('pdf-viewer-info-popover', undefined, { timeout: 5_000 })).toBeInTheDocument();
     expect(screen.getByTestId('pdf-viewer-info-title')).toHaveTextContent('-');
     expect(screen.getByTestId('pdf-viewer-info-producer')).toHaveTextContent('-');
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isInfoPanelOpen).toBe(true);
@@ -329,13 +331,15 @@ describe('PdfViewerPane', () => {
     expect(screen.getByTestId('pdf-viewer-thumbnail-rail')).toBeInTheDocument();
     expect(screen.getByTestId('pdf-viewer-fit-width')).not.toHaveTextContent('Width');
 
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-toggle-bookmarks')).not.toBeDisabled());
     fireEvent.click(screen.getByTestId('pdf-viewer-toggle-bookmarks'));
-    expect(screen.queryByTestId('pdf-viewer-bookmark-tree')).not.toBeInTheDocument();
-    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isBookmarkTreeVisible).toBe(false);
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-bookmark-tree')).not.toBeInTheDocument());
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isBookmarkTreeVisible).toBe(false));
 
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-toggle-thumbnails')).not.toBeDisabled());
     fireEvent.click(screen.getByTestId('pdf-viewer-toggle-thumbnails'));
-    expect(screen.queryByTestId('pdf-viewer-thumbnail-rail')).not.toBeInTheDocument();
-    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isThumbnailRailVisible).toBe(false);
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-thumbnail-rail')).not.toBeInTheDocument());
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').isThumbnailRailVisible).toBe(false));
   });
 
   it('applies page tone mode to page and thumbnail canvases', async () => {

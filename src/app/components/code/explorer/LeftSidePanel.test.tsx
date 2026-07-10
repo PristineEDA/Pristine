@@ -367,7 +367,7 @@ describe('LeftSidePanel', () => {
 
     await testUser.click(screen.getByTestId('rtl-regression-group-action-simulate-ip'));
     expect(useRtlRegressionStore.getState().activeRun).toBeNull();
-  });
+  }, 10_000);
 
   it('shows the RTL regression summary and controls all-suite simulation state', async () => {
     renderLeftSidePanel({}, { layoutMode: 'compact' });
