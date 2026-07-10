@@ -179,6 +179,12 @@ vi.mock('../../../git/workspaceGitStatus', () => ({
 
 vi.mock('../../../editor/configureMonacoLoader', () => ({}));
 
+vi.mock('./PdfViewerPane', () => ({
+  PdfViewerPane: ({ fileId, fileName }: { fileId: string; fileName: string }) => (
+    <div data-testid="pdf-viewer-pane" data-file-id={fileId} data-file-name={fileName} />
+  ),
+}));
+
 describe('EditorArea', () => {
   beforeEach(() => {
     const electronApi = window.electronAPI!;
@@ -300,6 +306,26 @@ describe('EditorArea', () => {
 
     expect(onTabChange).toHaveBeenCalledWith('rtl/core/alu.v');
     expect(onTabClose).toHaveBeenCalledWith('rtl/core/cpu_top.v');
+  });
+
+  it('renders PDF files in the PDF viewer without loading text content into Monaco', async () => {
+    render(
+      <EditorArea
+        tabs={[
+          { id: 'docs/spec.pdf', name: 'spec.pdf', isPinned: true },
+        ]}
+        activeTabId="docs/spec.pdf"
+        onTabChange={vi.fn()}
+        onTabClose={vi.fn()}
+        editorRef={createRef()}
+      />,
+    );
+
+    expect(await screen.findByTestId('pdf-viewer-pane')).toHaveAttribute('data-file-id', 'docs/spec.pdf');
+    expect(screen.getByTestId('pdf-viewer-pane')).toHaveAttribute('data-file-name', 'spec.pdf');
+    expect(screen.getByTestId('editor-tab-badge-docs/spec.pdf')).toHaveAttribute('data-icon-key', 'pdf');
+    expect(screen.queryByTestId('monaco-editor')).not.toBeInTheDocument();
+    expect(window.electronAPI!.fs.readFile).not.toHaveBeenCalledWith('docs/spec.pdf', 'utf-8');
   });
 
   it('uses rounded minimal tab chrome when the code viewer layout is minimal', () => {

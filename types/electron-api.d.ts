@@ -100,6 +100,8 @@ export interface ElectronAPI {
   fs: {
     readFile: (filePath: string, encoding?: string) => Promise<string>;
     readFileAbsolute: (filePath: string, encoding?: string) => Promise<string>;
+    readFileBinary: (filePath: string) => Promise<Uint8Array>;
+    readFileBinaryAbsolute: (filePath: string) => Promise<Uint8Array>;
     listFiles: (dirPath?: string) => Promise<string[]>;
     writeFile: (filePath: string, content: string) => Promise<void>;
     writeFileAbsolute: (filePath: string, content: string) => Promise<void>;
@@ -152,6 +154,7 @@ export interface ElectronAPI {
       pid: number | undefined;
     }>;
     kill: (id: string) => Promise<boolean>;
+    openExternal: (url: string) => Promise<boolean>;
     onStdout: (callback: (data: { id: string; data: string }) => void) => () => void;
     onStderr: (callback: (data: { id: string; data: string }) => void) => () => void;
     onExit: (callback: (data: { id: string; code: number | null; error?: string }) => void) => () => void;

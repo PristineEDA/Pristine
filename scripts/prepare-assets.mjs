@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs'
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { access, copyFile, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -14,6 +14,7 @@ const wallpaperTargetPath = path.join(generatedDir, 'empty-wallpaper.png')
 const generatedFontsDir = path.join(generatedDir, 'fonts')
 const generatedLogoDir = path.join(generatedDir, 'logo')
 const generatedSplashDir = path.join(generatedDir, 'splash')
+const generatedPdfJsDir = path.join(generatedDir, 'pdfjs')
 const splashBackgroundFileName = 'greek-lighthouse-masked-santorini-hillside-village-strict.png'
 const splashBackgroundTargetPath = path.join(generatedSplashDir, 'splash-background.png')
 const buildResourcesDir = path.join(workspaceRoot, 'build')
@@ -22,7 +23,7 @@ const defaultAssetUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-
 const assetUrl = process.env.PRISTINE_EMPTY_WALLPAPER_URL ?? defaultAssetUrl
 const defaultFontAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/fonts'
 const fontAssetBaseUrl = process.env.PRISTINE_FONT_ASSET_BASE_URL ?? defaultFontAssetBaseUrl
-const defaultLogoAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-letter-v3'
+const defaultLogoAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-official'
 const logoAssetBaseUrl = process.env.PRISTINE_LOGO_ASSET_BASE_URL ?? defaultLogoAssetBaseUrl
 const defaultSplashAssetBaseUrl = 'https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/splash/official'
 const splashAssetBaseUrl = process.env.PRISTINE_SPLASH_ASSET_BASE_URL ?? defaultSplashAssetBaseUrl
@@ -30,7 +31,7 @@ const defaultLocalResourceRoot = path.resolve(workspaceRoot, '..', 'pristine-res
 const localResourceRoot = process.env.PRISTINE_RES_LOCAL_DIR ?? defaultLocalResourceRoot
 const localWallpaperSourcePath = path.join(localResourceRoot, 'images', 'empty-wallpaper.png')
 const localFontSourceDir = path.join(localResourceRoot, 'fonts')
-const localLogoSourceDir = path.join(localResourceRoot, 'images', 'logo', 'logo-letter-v3')
+const localLogoSourceDir = path.join(localResourceRoot, 'images', 'logo', 'logo-official')
 const localSplashBackgroundSourcePath = path.join(
   localResourceRoot,
   'images',
@@ -38,6 +39,7 @@ const localSplashBackgroundSourcePath = path.join(
   'official',
   splashBackgroundFileName,
 )
+const pdfJsPackageRoot = path.join(workspaceRoot, 'node_modules', 'pdfjs-dist')
 
 const logoPngFiles = [
   'logo.png',
@@ -449,12 +451,33 @@ async function prepareSplashBackground() {
   await downloadRemoteSplashBackground()
 }
 
+async function copyPdfJsAssetDirectory(sourceDirName) {
+  const sourceDir = path.join(pdfJsPackageRoot, sourceDirName)
+  const targetDir = path.join(generatedPdfJsDir, sourceDirName)
+
+  if (!(await exists(sourceDir))) {
+    throw new Error(`Missing pdfjs-dist asset directory: ${path.relative(workspaceRoot, sourceDir)}`)
+  }
+
+  await rm(targetDir, { recursive: true, force: true })
+  await ensureDirectory(path.dirname(targetDir))
+  await cp(sourceDir, targetDir, { recursive: true })
+  console.log(`Prepared PDF.js ${sourceDirName}: ${path.relative(workspaceRoot, targetDir)}`)
+}
+
+async function preparePdfJsAssets() {
+  await ensureDirectory(generatedPdfJsDir)
+  await copyPdfJsAssetDirectory('cmaps')
+  await copyPdfJsAssetDirectory('standard_fonts')
+}
+
 async function main() {
   await ensureDirectory(generatedDir)
   await prepareFontAssets()
   await prepareLogoAssets()
   await prepareEmptyWallpaper()
   await prepareSplashBackground()
+  await preparePdfJsAssets()
 }
 
 main().catch((error) => {

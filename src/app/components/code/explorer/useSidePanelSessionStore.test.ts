@@ -36,13 +36,13 @@ describe('useSidePanelSessionStore', () => {
   it('updates explorer left tab, split, secondary tab, and hierarchy reload nonce', () => {
     getStore().setExplorerLeftTab('git');
     getStore().setExplorerLeftSplitVisible(true);
-    getStore().setExplorerLeftSecondaryTab('libraries');
+    getStore().setExplorerLeftSecondaryTab('rtl-regression');
     getStore().bumpExplorerLeftHierarchyReloadNonce();
     getStore().bumpExplorerLeftHierarchyReloadNonce();
 
     expect(getStore().leftPrimaryTab).toBe('git');
     expect(getStore().leftSplitVisible).toBe(true);
-    expect(getStore().leftSecondaryTab).toBe('libraries');
+    expect(getStore().leftSecondaryTab).toBe('rtl-regression');
     expect(getStore().leftHierarchyReloadNonce).toBe(2);
   });
 
@@ -84,7 +84,7 @@ describe('useSidePanelSessionStore', () => {
 
   it('captures and hydrates project side panel chrome without reload nonce', () => {
     getStore().setExplorerLeftTab('git');
-    getStore().setExplorerLeftSecondaryTab('libraries');
+    getStore().setExplorerLeftSecondaryTab('rtl-regression');
     getStore().setExplorerLeftSplitVisible(true);
     getStore().setExplorerRightTab('outline');
     getStore().setExplorerRightSecondaryTab('x-propagation');
@@ -103,7 +103,7 @@ describe('useSidePanelSessionStore', () => {
     getStore().hydrateProjectSidePanelSession(snapshot);
 
     expect(getStore().leftPrimaryTab).toBe('git');
-    expect(getStore().leftSecondaryTab).toBe('libraries');
+    expect(getStore().leftSecondaryTab).toBe('rtl-regression');
     expect(getStore().leftSplitVisible).toBe(true);
     expect(getStore().rightPrimaryTab).toBe('outline');
     expect(getStore().rightSecondaryTab).toBe('x-propagation');

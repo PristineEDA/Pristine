@@ -106,6 +106,43 @@ describe('filesystem IPC handlers', () => {
     });
   });
 
+  describe('FS_READ_FILE_BINARY', () => {
+    it('reads a project-scoped file as bytes', async () => {
+      const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46]);
+      mockFs.readFile.mockResolvedValue(bytes);
+      const handler = getHandler('async:fs:read-file-binary');
+
+      const result = await handler({}, 'docs/spec.pdf');
+
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(Array.from(result as Uint8Array)).toEqual([0x25, 0x50, 0x44, 0x46]);
+      expect(mockFs.readFile).toHaveBeenCalledWith(expect.stringMatching(/safe[\\/]project[\\/]docs[\\/]spec\.pdf$/));
+    });
+
+    it('rejects path traversal', async () => {
+      const handler = getHandler('async:fs:read-file-binary');
+      await expect(handler({}, '../../outside.pdf')).rejects.toThrow('Path traversal denied');
+    });
+
+    it('rejects reads when no project root is open', async () => {
+      setProjectRoot(null);
+      const handler = getHandler('async:fs:read-file-binary');
+
+      await expect(handler({}, 'docs/spec.pdf')).rejects.toThrow('Project root not set');
+    });
+
+    it('reads an absolute file path through the dedicated absolute binary channel', async () => {
+      const bytes = Buffer.from([1, 2, 3]);
+      mockFs.readFile.mockResolvedValue(bytes);
+      const handler = getHandler('async:fs:read-file-binary-absolute');
+
+      const result = await handler({}, '/safe/external/spec.pdf');
+
+      expect(Array.from(result as Uint8Array)).toEqual([1, 2, 3]);
+      expect(mockFs.readFile).toHaveBeenCalledWith(expect.stringMatching(/safe[\\/]external[\\/]spec\.pdf$/));
+    });
+  });
+
   describe('FS_WRITE_FILE', () => {
     it('rejects path traversal', async () => {
       const handler = getHandler('async:fs:write-file');

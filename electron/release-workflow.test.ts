@@ -314,7 +314,12 @@ describe('release workflow contract', () => {
   it('uses generated Pristine logo assets for packaged Windows, Linux, and macOS icons', () => {
     const electronBuilderConfig = fs.readFileSync(electronBuilderConfigPath, 'utf8')
     const preparePackageAppScript = fs.readFileSync(preparePackageAppScriptPath, 'utf8')
+    const prepareAssetsScript = fs.readFileSync(prepareAssetsScriptPath, 'utf8')
 
+    expect(prepareAssetsScript).toContain('https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/logo/logo-official')
+    expect(prepareAssetsScript).toContain("'images', 'logo', 'logo-official'")
+    expect(prepareAssetsScript).not.toContain('images/logo/logo-letter-v3')
+    expect(prepareAssetsScript).not.toContain("'images', 'logo', 'logo-letter-v3'")
     expect(electronBuilderConfig).toMatch(/win:\r?\n  icon: icon\.ico/)
     expect(electronBuilderConfig).toMatch(/linux:\r?\n  icon: icon\.png/)
     expect(electronBuilderConfig).toMatch(/mac:\r?\n  icon: icon\.icns/)
@@ -332,5 +337,14 @@ describe('release workflow contract', () => {
     expect(prepareAssetsScript).toContain("'splash',")
     expect(prepareAssetsScript).toContain("'official',")
     expect(prepareAssetsScript).toContain('https://raw.githubusercontent.com/PristineEDA/pristine-res/main/images/splash/official')
+  })
+
+  it('prepares PDF.js auxiliary assets for packaged PDF viewing', () => {
+    const prepareAssetsScript = fs.readFileSync(prepareAssetsScriptPath, 'utf8')
+
+    expect(prepareAssetsScript).toContain("path.join(generatedDir, 'pdfjs')")
+    expect(prepareAssetsScript).toContain("path.join(workspaceRoot, 'node_modules', 'pdfjs-dist')")
+    expect(prepareAssetsScript).toContain("copyPdfJsAssetDirectory('cmaps')")
+    expect(prepareAssetsScript).toContain("copyPdfJsAssetDirectory('standard_fonts')")
   })
 })

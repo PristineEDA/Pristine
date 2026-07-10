@@ -51,6 +51,17 @@ describe('useEditorDocumentState', () => {
     expect(result.current.activeTab?.name).toBe('reg_file.v');
   });
 
+  it('can skip document loading for non-text viewer tabs', () => {
+    const { result } = renderHook(() => useEditorDocumentState({
+      tabs: [{ id: 'docs/spec.pdf', name: 'spec.pdf' }],
+      activeTabId: 'docs/spec.pdf',
+      shouldLoadDocument: false,
+    }));
+
+    expect(result.current.isActiveTabReady).toBe(false);
+    expect(window.electronAPI?.fs.readFile).not.toHaveBeenCalled();
+  });
+
   it('loads content through the filesystem bridge when no external loader is provided', async () => {
     const deferred = createDeferred<string>();
     vi.mocked(window.electronAPI!.fs.readFile).mockReturnValueOnce(deferred.promise);

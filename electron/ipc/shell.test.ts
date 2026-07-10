@@ -4,8 +4,10 @@ import path from 'node:path';
 // ─── Mock electron / child_process before importing module ────────────────
 
 const mockHandle = vi.fn();
+const mockOpenExternal = vi.fn();
 vi.mock('electron', () => ({
   ipcMain: { handle: (...args: unknown[]) => mockHandle(...args) },
+  shell: { openExternal: (...args: unknown[]) => mockOpenExternal(...args) },
   BrowserWindow: class {},
 }));
 
@@ -67,6 +69,8 @@ describe('shell IPC handlers', () => {
 
   beforeEach(() => {
     mockHandle.mockClear();
+    mockOpenExternal.mockReset();
+    mockOpenExternal.mockResolvedValue(undefined);
     mockSpawn.mockClear();
     send = vi.fn();
     spawnedProcesses.length = 0;
@@ -194,6 +198,31 @@ describe('shell IPC handlers', () => {
       await expect(killHandler({}, id)).resolves.toBe(true);
       await expect(killHandler({}, id)).resolves.toBe(false);
       expect(fakeProc.kill).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('SHELL_OPEN_EXTERNAL', () => {
+    it('opens allowed external URLs', async () => {
+      const handler = getHandler('async:shell:open-external');
+
+      await expect(handler({}, 'https://example.com/docs')).resolves.toBe(true);
+
+      expect(mockOpenExternal).toHaveBeenCalledWith('https://example.com/docs');
+    });
+
+    it('rejects unsupported protocols', async () => {
+      const handler = getHandler('async:shell:open-external');
+
+      await expect(handler({}, 'file:///C:/secret.txt')).rejects.toThrow('protocol not allowed');
+      await expect(handler({}, 'javascript:alert(1)')).rejects.toThrow('protocol not allowed');
+      expect(mockOpenExternal).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid URL payloads', async () => {
+      const handler = getHandler('async:shell:open-external');
+
+      await expect(handler({}, 42)).rejects.toThrow('Expected string');
+      await expect(handler({}, 'not a url')).rejects.toThrow('Invalid external URL');
     });
   });
 });

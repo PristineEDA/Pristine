@@ -99,6 +99,8 @@ describe('preload bridge', () => {
     });
     api.fs.readFile('src/main.v', 'utf-8');
     api.fs.readFileAbsolute('C:/external/main.v', 'utf-8');
+    api.fs.readFileBinary('docs/spec.pdf');
+    api.fs.readFileBinaryAbsolute('C:/external/spec.pdf');
     api.fs.listFiles('rtl');
     api.fs.writeFile('rtl/main.v', 'module main; endmodule');
     api.fs.writeFileAbsolute('C:/external/main.v', 'module external; endmodule');
@@ -228,6 +230,8 @@ describe('preload bridge', () => {
     });
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:read-file', 'src/main.v', 'utf-8');
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:read-file-absolute', 'C:/external/main.v', 'utf-8');
+    expect(mockInvoke).toHaveBeenCalledWith('async:fs:read-file-binary', 'docs/spec.pdf');
+    expect(mockInvoke).toHaveBeenCalledWith('async:fs:read-file-binary-absolute', 'C:/external/spec.pdf');
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:list-files', 'rtl');
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:write-file', 'rtl/main.v', 'module main; endmodule');
     expect(mockInvoke).toHaveBeenCalledWith('async:fs:write-file-absolute', 'C:/external/main.v', 'module external; endmodule');
@@ -241,6 +245,8 @@ describe('preload bridge', () => {
     expect(mockInvoke).toHaveBeenCalledWith('async:git:get-status');
     expect(mockInvoke).toHaveBeenCalledWith('async:shell:exec', 'make', ['lint'], { cwd: 'rtl' });
     expect(mockInvoke).toHaveBeenCalledWith('async:shell:kill', 'shell-1');
+    api.shell.openExternal('https://example.com/spec.pdf');
+    expect(mockInvoke).toHaveBeenCalledWith('async:shell:open-external', 'https://example.com/spec.pdf');
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:create', { cwd: 'rtl', cols: 120, rows: 40, profile: 'wsl-pristine-eda' });
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:write', 'terminal-1', 'help');
     expect(mockInvoke).toHaveBeenCalledWith('async:terminal:resize', 'terminal-1', 160, 50);

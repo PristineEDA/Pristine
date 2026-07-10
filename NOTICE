@@ -29,6 +29,7 @@ ATTRIBUTIONS.md remains the readable per-project inventory, including project na
 ### Apache License 2.0
 
 Covered components:
+- PDF.js (Desktop Runtime & Editors; declared as Apache-2.0)
 - Dobri Next -A00- Black (Bundled Editor Themes; declared as Apache-2.0)
 - Dobri Next -A01- Dark (Bundled Editor Themes; declared as Apache-2.0)
 - Dobri Next -A03- Mirage (Bundled Editor Themes; declared as Apache-2.0)

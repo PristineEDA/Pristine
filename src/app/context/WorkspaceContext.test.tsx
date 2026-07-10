@@ -54,6 +54,7 @@ function WorkspaceHarness() {
       <button onClick={() => workspace.setActiveView('simulation')}>set-view</button>
       <button onClick={() => workspace.openFile('rtl/core/reg_file.v', 'reg_file.v')}>open-reg</button>
       <button onClick={() => workspace.openFile('rtl/core/alu.v', 'alu.v')}>open-alu</button>
+      <button onClick={() => workspace.openFile('docs/spec.pdf', 'spec.pdf')}>open-pdf</button>
       <button onClick={() => workspace.openUntitledFile()}>open-untitled</button>
       <button onClick={() => workspace.openPreviewFile('rtl/core/reg_file.v', 'reg_file.v')}>preview-reg</button>
       <button onClick={() => workspace.openPreviewFile('rtl/core/alu.v', 'alu.v')}>preview-alu</button>
@@ -254,6 +255,22 @@ describe('WorkspaceContext', () => {
       expect(screen.getByTestId('tabs')).toHaveTextContent('rtl/reg_file.v');
       expect(screen.getByTestId('clipboard-mode')).toHaveTextContent('');
     });
+  });
+
+  it('opens PDF tabs without loading them through the text file store', async () => {
+    render(
+      <WorkspaceProvider>
+        <WorkspaceHarness />
+      </WorkspaceProvider>,
+    );
+
+    await clickHarnessButton('open-pdf');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-tab')).toHaveTextContent('docs/spec.pdf');
+      expect(screen.getByTestId('tabs')).toHaveTextContent('docs/spec.pdf');
+    });
+    expect(window.electronAPI?.fs.readFile).not.toHaveBeenCalledWith('docs/spec.pdf', 'utf-8');
   });
 
   it('prompts for unsaved changes before arming copy clipboard state', async () => {

@@ -146,6 +146,10 @@ const electronAPI = {
       ipcRenderer.invoke(AsyncChannels.FS_READ_FILE, filePath, encoding) as Promise<string>,
     readFileAbsolute: (filePath: string, encoding?: string) =>
       ipcRenderer.invoke(AsyncChannels.FS_READ_FILE_ABSOLUTE, filePath, encoding) as Promise<string>,
+    readFileBinary: (filePath: string) =>
+      ipcRenderer.invoke(AsyncChannels.FS_READ_FILE_BINARY, filePath) as Promise<Uint8Array>,
+    readFileBinaryAbsolute: (filePath: string) =>
+      ipcRenderer.invoke(AsyncChannels.FS_READ_FILE_BINARY_ABSOLUTE, filePath) as Promise<Uint8Array>,
     listFiles: (dirPath = '.') =>
       ipcRenderer.invoke(AsyncChannels.FS_LIST_FILES, dirPath) as Promise<string[]>,
     writeFile: (filePath: string, content: string) =>
@@ -225,6 +229,8 @@ const electronAPI = {
       }>,
     kill: (id: string) =>
       ipcRenderer.invoke(AsyncChannels.SHELL_KILL, id) as Promise<boolean>,
+    openExternal: (url: string) =>
+      ipcRenderer.invoke(AsyncChannels.SHELL_OPEN_EXTERNAL, url) as Promise<boolean>,
     onStdout: (callback: (data: { id: string; data: string }) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: { id: string; data: string }) =>
         callback(payload);

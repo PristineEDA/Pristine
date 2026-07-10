@@ -608,11 +608,13 @@ async function waitForStartupWindow(
 async function expectSplashVisuals(
   page: Page,
   options: {
+    progressVisible?: boolean;
     progressPanelOpacity?: string;
     requireProgressLayoutAttributes?: boolean;
     scrimIntensity?: string;
   } = {},
 ) {
+  const progressVisible = options.progressVisible ?? false;
   const requireProgressLayoutAttributes = options.requireProgressLayoutAttributes ?? true;
   const backgroundImage = page.getByTestId('splash-background-image');
   const brandLogo = page.getByTestId('splash-brand-logo');
@@ -625,15 +627,19 @@ async function expectSplashVisuals(
   await expect(brandLogo).toBeVisible();
   await expect(brandTitle).toHaveText('Pristine');
   await expect(page.locator('html')).toHaveAttribute('data-splash-assets-ready', 'true');
-  await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '1');
-  await expect(progress).toBeVisible();
-  await expect(progress).toHaveAttribute('data-progress-visible', 'true');
-  if (requireProgressLayoutAttributes) {
-    await expect(progress).toHaveAttribute('data-progress-glass-visible', 'true');
-    await expect(progress).toHaveAttribute('data-progress-width', 'full');
+  await expect(scrim).toHaveAttribute('data-scrim-intensity', options.scrimIntensity ?? '0.25');
+  await expect(progress).toHaveAttribute('data-progress-visible', String(progressVisible));
+  if (progressVisible) {
+    await expect(progress).toBeVisible();
+    if (requireProgressLayoutAttributes) {
+      await expect(progress).toHaveAttribute('data-progress-glass-visible', 'true');
+      await expect(progress).toHaveAttribute('data-progress-width', 'full');
+    }
+    await expect(progress).toHaveAttribute('data-progress-panel-opacity', options.progressPanelOpacity ?? '0.45');
+    await expect(progressBar).toBeVisible();
+  } else {
+    await expect(progress).toBeHidden();
   }
-  await expect(progress).toHaveAttribute('data-progress-panel-opacity', options.progressPanelOpacity ?? '0.45');
-  await expect(progressBar).toBeVisible();
 
   await expect.poll(
     async () => backgroundImage.evaluate((element) => {
@@ -785,6 +791,73 @@ function createWorkspaceCopyWithFiles(targetName: string, files: Record<string, 
   }
 
   return targetPath;
+}
+
+function createE2EPdfBuffer(pageCount = 2) {
+  const parts: string[] = ['%PDF-1.4\n'];
+  const offsets: number[] = [];
+
+  const addObject = (objectId: number, body: string) => {
+    offsets[objectId] = Buffer.byteLength(parts.join(''), 'ascii');
+    parts.push(`${objectId} 0 obj\n${body}\nendobj\n`);
+  };
+
+  const normalizedPageCount = Math.max(1, pageCount);
+  const pageObjects = Array.from({ length: normalizedPageCount }, (_, index) => ({
+    contentId: 4 + index * 2,
+    pageId: 3 + index * 2,
+  }));
+  const fontObjectId = 3 + normalizedPageCount * 2;
+  const outlinesObjectId = fontObjectId + 1;
+  const firstOutlineObjectId = outlinesObjectId + 1;
+  const linkObjectId = firstOutlineObjectId + normalizedPageCount;
+  const infoObjectId = linkObjectId + 1;
+  const pageKids = pageObjects.map(({ pageId }) => `${pageId} 0 R`).join(' ');
+
+  addObject(1, `<< /Type /Catalog /Pages 2 0 R /Outlines ${outlinesObjectId} 0 R >>`);
+  addObject(2, `<< /Type /Pages /Kids [${pageKids}] /Count ${normalizedPageCount} >>`);
+
+  for (let index = 0; index < normalizedPageCount; index += 1) {
+    const pageNumber = index + 1;
+    const { contentId, pageId } = pageObjects[index];
+    const annotationClause = pageNumber === 1 ? ` /Annots [${linkObjectId} 0 R]` : '';
+    const pageStream = pageNumber === 1
+      ? 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1 https://example.com/pristine-pdf) Tj ET'
+      : `BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page ${pageNumber}) Tj ET`;
+
+    addObject(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentId} 0 R${annotationClause} >>`);
+    addObject(contentId, `<< /Length ${Buffer.byteLength(pageStream, 'ascii')} >>\nstream\n${pageStream}\nendstream`);
+  }
+
+  addObject(fontObjectId, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  addObject(outlinesObjectId, `<< /Type /Outlines /First ${firstOutlineObjectId} 0 R /Last ${firstOutlineObjectId + normalizedPageCount - 1} 0 R /Count ${normalizedPageCount} >>`);
+
+  for (let index = 0; index < normalizedPageCount; index += 1) {
+    const outlineObjectId = firstOutlineObjectId + index;
+    const pageNumber = index + 1;
+    const previousClause = pageNumber > 1 ? ` /Prev ${outlineObjectId - 1} 0 R` : '';
+    const nextClause = pageNumber < normalizedPageCount ? ` /Next ${outlineObjectId + 1} 0 R` : '';
+
+    addObject(outlineObjectId, `<< /Title (Page ${pageNumber}) /Parent ${outlinesObjectId} 0 R${previousClause}${nextClause} /Dest [${pageObjects[index].pageId} 0 R /Fit] >>`);
+  }
+
+  addObject(linkObjectId, '<< /Type /Annot /Subtype /Link /Rect [72 1200 560 1280] /Border [0 0 0] /A << /S /URI /URI (https://example.com/pristine-pdf) >> >>');
+  addObject(infoObjectId, '<< /Title (Pristine PDF E2E Spec) /Author (Pristine E2E) /Subject (PDF viewer metadata) /Keywords (Pristine PDF) /CreationDate (D:20260707074950) /ModDate (D:20260707074950) /Creator (Pristine E2E generator) /Producer (Pristine E2E PDF writer) >>');
+
+  const xrefOffset = Buffer.byteLength(parts.join(''), 'ascii');
+  parts.push('xref\n');
+  parts.push(`0 ${infoObjectId + 1}\n`);
+  parts.push('0000000000 65535 f \n');
+  for (let objectId = 1; objectId <= infoObjectId; objectId += 1) {
+    parts.push(`${String(offsets[objectId]).padStart(10, '0')} 00000 n \n`);
+  }
+  parts.push('trailer\n');
+  parts.push(`<< /Size ${infoObjectId + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\n`);
+  parts.push('startxref\n');
+  parts.push(`${xrefOffset}\n`);
+  parts.push('%%EOF\n');
+
+  return Buffer.from(parts.join(''), 'ascii');
 }
 
 function initializeGitWorkspaceCopy(targetPath: string, branchName: string) {
@@ -3744,29 +3817,46 @@ test('window controls toggle minimize and maximize state', async () => {
   const { app, window } = await launchApp();
   const browserWindow = await app.browserWindow(window);
 
-  const maximizeButton = window.getByTestId('window-control-maximize');
-  await expect(maximizeButton).toBeVisible();
-  await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
-  await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
-  await maximizeButton.click();
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(true);
-  await expect(maximizeButton).toHaveAttribute('aria-label', 'Restore Window');
-  await expect(maximizeButton.locator('svg.lucide-copy')).toBeVisible();
+  const focusMainWindow = async () => {
+    await browserWindow.evaluate((win) => {
+      if (win.isMinimized()) {
+        win.restore();
+      }
+      win.show();
+      win.focus();
+    });
+    await window.bringToFront();
+  };
 
-  await maximizeButton.click();
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(false);
-  await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
-  await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
+  try {
+    await focusMainWindow();
 
-  const minimizeButton = window.getByTestId('window-control-minimize');
-  await expect(minimizeButton).toBeVisible();
-  await minimizeButton.click();
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(true);
+    const maximizeButton = window.getByTestId('window-control-maximize');
+    await expect(maximizeButton).toBeVisible();
+    await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
+    await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
+    await maximizeButton.click();
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(true);
+    await expect(maximizeButton).toHaveAttribute('aria-label', 'Restore Window');
+    await expect(maximizeButton.locator('svg.lucide-copy')).toBeVisible();
 
-  await browserWindow.evaluate((win) => win.restore());
-  await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(false);
+    await focusMainWindow();
+    await maximizeButton.click();
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMaximized())).toBe(false);
+    await expect(maximizeButton).toHaveAttribute('aria-label', 'Maximize Window');
+    await expect(maximizeButton.locator('svg.lucide-square')).toBeVisible();
 
-  await app.close();
+    const minimizeButton = window.getByTestId('window-control-minimize');
+    await expect(minimizeButton).toBeVisible();
+    await focusMainWindow();
+    await minimizeButton.click();
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(true);
+
+    await browserWindow.evaluate((win) => win.restore());
+    await expect.poll(async () => browserWindow.evaluate((win) => win.isMinimized())).toBe(false);
+  } finally {
+    await app.close();
+  }
 });
 
 test('application menu expands on hover and stays visible when locked', async () => {
@@ -4277,7 +4367,7 @@ test('settings dialog supports subpage navigation and global search', async () =
   await expect(window.getByTestId('settings-nav-appearance')).toHaveAttribute('aria-current', 'page');
   await expect(window.getByTestId('settings-theme-combobox')).toBeVisible();
   await expect(window.getByTestId('settings-splash-scrim-slider')).toBeVisible();
-  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('100%');
+  await expect(window.getByTestId('settings-splash-scrim-value')).toHaveText('25%');
   await expect(window.getByTestId('settings-splash-section-grid')).toBeVisible();
   await expect(window.getByTestId('settings-splash-overlay-column')).toBeVisible();
   await expect(window.getByTestId('settings-splash-progress-column')).toBeVisible();
@@ -4331,11 +4421,15 @@ test('settings dialog supports subpage navigation and global search', async () =
     const image = element as { complete?: boolean; naturalWidth?: number };
     return Boolean(image.complete && (image.naturalWidth ?? 0) > 0);
   })).toBe(true);
-  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '1.00');
-  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect(window.getByTestId('settings-splash-preview-scrim')).toHaveAttribute('data-scrim-intensity', '0.25');
+  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'unchecked');
   await expect(window.getByTestId('settings-splash-progress-glass-visible-switch')).toHaveAttribute('data-state', 'checked');
   await expect(window.getByTestId('settings-splash-progress-width-select')).toContainText('Full width');
   await expect(window.getByTestId('settings-splash-progress-panel-opacity-value')).toHaveText('45%');
+  await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeHidden();
+  await setSwitchChecked(window.getByTestId('settings-splash-progress-visible-switch'), true);
+  await expect(window.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'checked');
+  await expect.poll(async () => readConfigValue(window, 'workbench.splashProgressVisible')).toBe(true);
   await expect(window.getByTestId('settings-splash-preview-progress-shell')).toBeVisible();
   await expect(window.getByTestId('settings-splash-preview-progress-shell')).toHaveAttribute('data-progress-width', 'full');
   await expect(window.getByTestId('settings-splash-preview-progress-panel')).toBeVisible();
@@ -4644,6 +4738,488 @@ test('explorer opens a file into a new editor tab', async () => {
   await app.close();
 });
 
+test('file tree opens PDF files in the center editor tab', async () => {
+  const pdfBuffer = createE2EPdfBuffer();
+  const projectRoot = createWorkspaceCopyWithFiles('pdf-viewer-project', {
+    'docs/spec.pdf': pdfBuffer,
+  });
+  const { app, window } = await launchApp({ projectRoot });
+
+  await ensureExplorerVisible(window);
+  await openNestedWorkspaceFile(window, [
+    toWorkspaceTreeTestId('docs'),
+    toWorkspaceTreeTestId('docs/spec.pdf'),
+  ]);
+
+  await expect(window.getByTestId('editor-tab-docs/spec.pdf')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-pane')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.locator('.monaco-editor')).toHaveCount(0);
+
+  const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
+  const firstPageCanvas = window.getByTestId('pdf-viewer-page-canvas-1');
+  const secondPageCanvas = window.getByTestId('pdf-viewer-page-canvas-2');
+  await expect(viewport).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toBeVisible();
+  await expect(window.getByText('Bookmarks')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-bookmark-bookmark-0')).toContainText('Page 1');
+  await expect(window.getByTestId('pdf-viewer-bookmark-bookmark-1')).toContainText('Page 2');
+  await expect.poll(async () => {
+    const bookmarkHeader = window.getByText('Bookmarks');
+    const bookmarkItem = window.getByTestId('pdf-viewer-bookmark-bookmark-0');
+    return Promise.all([
+      bookmarkHeader.evaluate((element) => {
+        const ownerDocument = (element as unknown as {
+          ownerDocument?: {
+            defaultView?: {
+              getComputedStyle: (target: unknown) => { fontSize: string };
+            } | null;
+          };
+        }).ownerDocument;
+        return ownerDocument?.defaultView?.getComputedStyle(element).fontSize ?? '';
+      }),
+      bookmarkItem.evaluate((element) => {
+        const ownerDocument = (element as unknown as {
+          ownerDocument?: {
+            defaultView?: {
+              getComputedStyle: (target: unknown) => { fontSize: string };
+            } | null;
+          };
+        }).ownerDocument;
+        return ownerDocument?.defaultView?.getComputedStyle(element).fontSize ?? '';
+      }),
+    ]);
+  }, {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toEqual(['11px', '11px']);
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-1')).toHaveAttribute('aria-current', 'page');
+  await expect(firstPageCanvas).toBeVisible();
+  await expect(secondPageCanvas).toBeAttached();
+  await expect(window.getByTestId('pdf-viewer-text-layer-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-link-1-0')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(0);
+  const initialCanvasWidth = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0));
+  const initialCanvasHeight = await firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('height') ?? 0));
+
+  await window.getByTestId('pdf-viewer-last-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-thumbnail-2')).toHaveAttribute('aria-current', 'page');
+
+  await window.getByTestId('pdf-viewer-first-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  await window.getByTestId('pdf-viewer-rotate-clockwise').click();
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasHeight);
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('height') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasWidth);
+  await expect(window.getByTestId('pdf-viewer-thumbnail-1')).toHaveAttribute('aria-current', 'page');
+
+  await window.getByTestId('pdf-viewer-rotate-counterclockwise').click();
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasWidth);
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('height') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe(initialCanvasHeight);
+
+  const presentationButton = window.getByTestId('pdf-viewer-presentation-mode');
+  await expect(presentationButton).toBeVisible();
+  await expect(presentationButton).toBeEnabled();
+  await presentationButton.click();
+  await expect(window.getByTestId('pdf-viewer-pane')).toHaveAttribute('data-pdf-presentation-mode', 'true', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-toolbar')).toHaveCount(0);
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toHaveCount(0);
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toHaveCount(0);
+  await expect(window.getByTestId('pdf-viewer-page-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-2')).toHaveCount(0);
+
+  await window.keyboard.press('Escape');
+  await expect(window.getByTestId('pdf-viewer-pane')).not.toHaveAttribute('data-pdf-presentation-mode', 'true', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-toolbar')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  await window.getByTestId('pdf-viewer-info-menu').click();
+  await expect(window.getByTestId('pdf-viewer-info-popover')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  const infoContentBox = await window.getByTestId('pdf-viewer-info-content').boundingBox();
+  const pdfViewerBox = await window.getByTestId('pdf-viewer-pane').boundingBox();
+  expect(infoContentBox).not.toBeNull();
+  expect(pdfViewerBox).not.toBeNull();
+  expect(infoContentBox!.x + infoContentBox!.width).toBeLessThanOrEqual(pdfViewerBox!.x + pdfViewerBox!.width + 1);
+  await expect(window.getByTestId('pdf-viewer-info-fileName')).toContainText('spec.pdf');
+  await expect(window.getByTestId('pdf-viewer-info-fileSize')).toContainText(`${pdfBuffer.length.toLocaleString('en-US')} bytes`);
+  await expect(window.getByTestId('pdf-viewer-info-title')).toContainText('Pristine PDF E2E Spec');
+  await expect(window.getByTestId('pdf-viewer-info-author')).toContainText('Pristine E2E');
+  await expect(window.getByTestId('pdf-viewer-info-pdfVersion')).toContainText('1.4');
+  await expect(window.getByTestId('pdf-viewer-info-pageCount')).toContainText('2');
+  await expect(window.getByTestId('pdf-viewer-info-pageSize')).toContainText('16.67 × 19.44 in');
+  await expect(window.getByTestId('pdf-viewer-info-fastWebView')).toContainText('No');
+  await window.getByTestId('pdf-viewer-info-close').click();
+  await expect(window.getByTestId('pdf-viewer-info-popover')).toHaveCount(0);
+
+  const pageToneMenu = window.getByTestId('pdf-viewer-page-tone-menu');
+  await pageToneMenu.focus();
+  await window.keyboard.down('Shift');
+  await expect.poll(async () => pageToneMenu.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => {
+            boxShadow: string;
+            outlineStyle: string;
+            outlineWidth: string;
+          };
+        } | null;
+      };
+    }).ownerDocument;
+    const styles = ownerDocument?.defaultView?.getComputedStyle(element);
+    return {
+      boxShadow: styles?.boxShadow ?? '',
+      outlineStyle: styles?.outlineStyle ?? '',
+      outlineWidth: styles?.outlineWidth ?? '',
+    };
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toEqual({ boxShadow: 'none', outlineStyle: 'none', outlineWidth: '0px' });
+  await window.keyboard.up('Shift');
+
+  await window.getByTestId('pdf-viewer-page-tone-menu').click();
+  const pageToneMenuContent = window.getByTestId('pdf-viewer-page-tone-menu-content');
+  await expect(pageToneMenuContent).toBeVisible();
+  await expect.poll(async () => pageToneMenuContent.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => { backgroundColor: string };
+        } | null;
+      };
+    }).ownerDocument;
+    return ownerDocument?.defaultView?.getComputedStyle(element).backgroundColor ?? 'rgba(0, 0, 0, 0)';
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).not.toBe('rgba(0, 0, 0, 0)');
+  await window.getByTestId('pdf-viewer-page-tone-soft').click();
+  await expect(firstPageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => { filter: string };
+        } | null;
+      };
+    }).ownerDocument;
+    return ownerDocument?.defaultView?.getComputedStyle(element).filter ?? 'none';
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).not.toBe('none');
+
+  await window.getByTestId('pdf-viewer-page-tone-menu').click();
+  await window.getByTestId('pdf-viewer-page-tone-original').click();
+  await expect(firstPageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'original');
+  await expect.poll(async () => firstPageCanvas.evaluate((element) => {
+    const ownerDocument = (element as unknown as {
+      ownerDocument?: {
+        defaultView?: {
+          getComputedStyle: (target: unknown) => { filter: string };
+        } | null;
+      };
+    }).ownerDocument;
+    return ownerDocument?.defaultView?.getComputedStyle(element).filter ?? 'none';
+  }), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBe('none');
+
+  await window.getByTestId('pdf-viewer-page-tone-menu').click();
+  await window.getByTestId('pdf-viewer-page-tone-soft').click();
+  await expect(firstPageCanvas).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+  await window.getByTestId(toWorkspaceTreeTestId('README.md')).click();
+  await waitForMonacoEditor(window);
+  const pdfTreeNode = window.getByTestId(toWorkspaceTreeTestId('docs/spec.pdf'));
+  if (!await pdfTreeNode.isVisible()) {
+    await window.getByTestId(toWorkspaceTreeTestId('docs')).click();
+  }
+  await expect(pdfTreeNode).toBeVisible();
+  await pdfTreeNode.click();
+  await expect(window.getByTestId('pdf-viewer-page-canvas-1')).toHaveAttribute('data-pdf-page-tone-mode', 'soft');
+
+  await window.getByTestId('pdf-viewer-bookmark-bookmark-1').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.getByTestId('pdf-viewer-bookmark-bookmark-0').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.getByTestId('pdf-viewer-toggle-bookmarks').click();
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toHaveCount(0);
+  await window.getByTestId('pdf-viewer-toggle-bookmarks').click();
+  await expect(window.getByTestId('pdf-viewer-bookmark-tree')).toBeVisible();
+  await window.getByTestId('pdf-viewer-toggle-thumbnails').click();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toHaveCount(0);
+  await window.getByTestId('pdf-viewer-toggle-thumbnails').click();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-rail')).toBeVisible();
+
+  await viewport.click();
+  await window.mouse.wheel(0, 1800);
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-thumbnail-2')).toHaveAttribute('aria-current', 'page');
+
+  await window.getByTestId('pdf-viewer-fit-page').click();
+  await expect(window.getByTestId('pdf-viewer-fit-page')).toHaveAttribute('aria-pressed', 'true');
+  await window.getByTestId('pdf-viewer-fit-width').click();
+  await expect(window.getByTestId('pdf-viewer-fit-width')).toHaveAttribute('aria-pressed', 'true');
+
+  const fitWidthZoom = await window.getByTestId('pdf-viewer-zoom-indicator').textContent();
+  const zoomViewportBox = await viewport.boundingBox();
+  if (!zoomViewportBox) {
+    throw new Error('Expected PDF viewport bounds before zoom.');
+  }
+  await window.mouse.move(zoomViewportBox.x + zoomViewportBox.width / 2, zoomViewportBox.y + zoomViewportBox.height / 2);
+  await viewport.click();
+  await window.keyboard.down('Control');
+  await window.mouse.wheel(0, -400);
+  await window.keyboard.up('Control');
+  await expect.poll(async () => {
+    const zoomText = await window.getByTestId('pdf-viewer-zoom-indicator').textContent();
+    return Number(zoomText?.replace('%', '') ?? 0);
+  }, {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(Number(fitWidthZoom?.replace('%', '') ?? 0));
+  await expect(window.getByTestId('pdf-viewer-fit-width')).toHaveAttribute('aria-pressed', 'false');
+
+  await window.getByTestId('pdf-viewer-thumbnail-2').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2');
+  await window.getByTestId('pdf-viewer-prev-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2');
+  await window.getByTestId('pdf-viewer-next-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2');
+
+  await window.getByTestId('pdf-viewer-reset-zoom').click();
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('200%');
+  for (let index = 0; index < 16; index += 1) {
+    await window.getByTestId('pdf-viewer-zoom-in').click();
+  }
+  await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('600%');
+  await expect.poll(async () => secondPageCanvas.evaluate((element) => Number((element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('width') ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(initialCanvasWidth);
+  const horizontalBefore = await viewport.evaluate((element) => Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0));
+  const horizontalDelta = horizontalBefore > 0 ? -700 : 700;
+  await viewport.dispatchEvent('wheel', {
+    bubbles: true,
+    cancelable: true,
+    deltaY: horizontalDelta,
+    shiftKey: true,
+  });
+  if (horizontalDelta > 0) {
+    await expect.poll(async () => viewport.evaluate((element) => Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0)), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBeGreaterThan(horizontalBefore);
+  } else {
+    await expect.poll(async () => viewport.evaluate((element) => Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0)), {
+      timeout: UI_READY_TIMEOUT_MS,
+    }).toBeLessThan(horizontalBefore);
+  }
+
+  await window.getByTestId('pdf-viewer-hand-tool').click();
+  await expect(window.getByTestId('pdf-viewer-hand-tool')).toHaveAttribute('aria-pressed', 'true');
+  const handScrollBefore = await viewport.evaluate((element) => ({
+    left: Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0),
+    top: Number((element as unknown as { scrollTop?: number }).scrollTop ?? 0),
+  }));
+  const viewportBox = await viewport.boundingBox();
+  if (!viewportBox) {
+    throw new Error('Expected PDF viewport bounds.');
+  }
+  await window.mouse.move(viewportBox.x + viewportBox.width / 2, viewportBox.y + viewportBox.height / 2);
+  await window.mouse.down();
+  await window.mouse.move(viewportBox.x + viewportBox.width / 2 - 90, viewportBox.y + viewportBox.height / 2 - 90);
+  await window.mouse.up();
+  await expect.poll(async () => viewport.evaluate((element) => ({
+    left: Number((element as unknown as { scrollLeft?: number }).scrollLeft ?? 0),
+    top: Number((element as unknown as { scrollTop?: number }).scrollTop ?? 0),
+  })), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).not.toEqual(handScrollBefore);
+
+  await window.getByTestId('pdf-viewer-select-tool').click();
+  await expect(window.getByTestId('pdf-viewer-select-tool')).toHaveAttribute('aria-pressed', 'true');
+  await window.getByTestId('pdf-viewer-thumbnail-1').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2');
+  await window.evaluate(() => {
+    const browserGlobal = globalThis as unknown as {
+      document: {
+        createRange: () => {
+          selectNodeContents: (node: unknown) => void;
+        };
+        dispatchEvent: (event: Event) => void;
+        querySelector: (selector: string) => unknown;
+      };
+      getSelection: () => {
+        addRange: (range: unknown) => void;
+        removeAllRanges: () => void;
+      } | null;
+    };
+    const firstTextSpan = browserGlobal.document.querySelector('[data-testid="pdf-viewer-text-layer-1"] span');
+    if (!firstTextSpan) {
+      throw new Error('Expected a PDF text span for highlight selection.');
+    }
+    const range = browserGlobal.document.createRange();
+    range.selectNodeContents(firstTextSpan);
+    const selection = browserGlobal.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    browserGlobal.document.dispatchEvent(new Event('selectionchange'));
+  });
+  await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toHaveCount(0);
+  await viewport.dispatchEvent('mouseup');
+  await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await window.getByTestId('pdf-viewer-selection-highlight').click();
+  await expect(window.getByTestId('pdf-viewer-highlight').first()).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await window.getByTestId('pdf-viewer-hand-tool').click();
+  await expect(window.getByTestId('pdf-viewer-hand-tool')).toHaveAttribute('aria-pressed', 'true');
+  await window.evaluate(() => {
+    const browserGlobal = globalThis as unknown as {
+      document: {
+        createRange: () => {
+          selectNodeContents: (node: unknown) => void;
+        };
+        dispatchEvent: (event: Event) => void;
+        querySelector: (selector: string) => unknown;
+      };
+      getSelection: () => {
+        addRange: (range: unknown) => void;
+        removeAllRanges: () => void;
+      } | null;
+    };
+    const firstTextSpan = browserGlobal.document.querySelector('[data-testid="pdf-viewer-text-layer-1"] span');
+    if (!firstTextSpan) {
+      throw new Error('Expected a PDF text span for hand tool selection.');
+    }
+    const range = browserGlobal.document.createRange();
+    range.selectNodeContents(firstTextSpan);
+    const selection = browserGlobal.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    browserGlobal.document.dispatchEvent(new Event('selectionchange'));
+  });
+  await viewport.dispatchEvent('mouseup');
+  await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toHaveCount(0);
+  await window.getByTestId('pdf-viewer-select-tool').click();
+  await expect(window.getByTestId('pdf-viewer-select-tool')).toHaveAttribute('aria-pressed', 'true');
+  await viewport.click();
+  await window.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
+  await expect(window.getByTestId('pdf-viewer-search-input')).toBeVisible();
+  await window.getByTestId('pdf-viewer-search-input').fill('Pristine');
+  await expect(window.getByTestId('pdf-viewer-search-count')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-search-highlight').first()).toBeVisible();
+  await window.getByTestId('pdf-viewer-search-next').click();
+  await expect(window.getByTestId('pdf-viewer-search-count')).toContainText('2 / 2');
+
+  await app.close();
+});
+
+test('PDF thumbnail rail follows the main viewport current page', async () => {
+  const projectRoot = createWorkspaceCopyWithFiles('pdf-thumbnail-sync-project', {
+    'docs/long-spec.pdf': createE2EPdfBuffer(12),
+  });
+  const { app, window } = await launchApp({ projectRoot });
+
+  await ensureExplorerVisible(window);
+  await openNestedWorkspaceFile(window, [
+    toWorkspaceTreeTestId('docs'),
+    toWorkspaceTreeTestId('docs/long-spec.pdf'),
+  ]);
+
+  await expect(window.getByTestId('pdf-viewer-pane')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 12', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
+  const thumbnailRail = window.getByTestId('pdf-viewer-thumbnail-rail');
+  const initialThumbnailScrollTop = await thumbnailRail.evaluate((element) => Number((element as unknown as {
+    scrollTop?: number;
+  }).scrollTop ?? 0));
+
+  await viewport.evaluate((element) => {
+    const viewportElement = element as unknown as {
+      dispatchEvent: (event: Event) => boolean;
+      scrollHeight: number;
+      scrollTop: number;
+    };
+    viewportElement.scrollTop = viewportElement.scrollHeight;
+    viewportElement.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+
+  await expect.poll(async () => {
+    const pageIndicatorText = await window.getByTestId('pdf-viewer-page-indicator').textContent();
+    return Number(pageIndicatorText?.match(/^(\d+)/)?.[1] ?? 0);
+  }, {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(8);
+  const activePageNumber = await window.getByTestId('pdf-viewer-page-indicator').evaluate((element) => {
+    const textContent = (element as unknown as { textContent?: string | null }).textContent ?? '';
+    return Number(textContent.match(/^(\d+)/)?.[1] ?? 0);
+  });
+  const activeThumbnail = window.getByTestId(`pdf-viewer-thumbnail-${activePageNumber}`);
+  await expect(activeThumbnail).toHaveAttribute('aria-current', 'page');
+  await expect.poll(async () => thumbnailRail.evaluate((element) => Number((element as unknown as {
+    scrollTop?: number;
+  }).scrollTop ?? 0)), {
+    timeout: UI_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(initialThumbnailScrollTop);
+  const activeThumbnailIsVisible = await activeThumbnail.evaluate((element) => {
+    const sourceElement = element as unknown as {
+      closest: (selector: string) => unknown;
+    };
+    const rail = sourceElement.closest('[data-testid="pdf-viewer-thumbnail-rail"]');
+    const getRect = (node: unknown) => (node as {
+      getBoundingClientRect: () => {
+        bottom: number;
+        top: number;
+      };
+    }).getBoundingClientRect();
+    if (!rail) {
+      return false;
+    }
+
+    const thumbnailRect = getRect(element);
+    const railRect = getRect(rail);
+    return thumbnailRect.top >= railRect.top && thumbnailRect.bottom <= railRect.bottom;
+  });
+  expect(activeThumbnailIsVisible).toBe(true);
+
+  await app.close();
+});
+
 test('pristine-engine lsp smoke resolves a cross-file definition and symbol references', async () => {
   test.slow();
   skipIfPristineEngineUnavailable();
@@ -4924,6 +5500,88 @@ test('code view hierarchy renders module instantiations from pristine-engine', a
   });
 
   await app.close();
+});
+
+test('left panel RTL regression lower tab renders mock suites and run controls', async () => {
+  const { app, window } = await launchApp();
+
+  try {
+    await ensureExplorerVisible(window);
+
+    await window.getByTestId('left-panel-split-toggle').click();
+    await expect(window.getByTestId('left-panel-secondary-panel')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+    await expect(window.getByTestId('left-panel-secondary-tab-hierarchy')).toBeVisible();
+    await expect(window.getByTestId('left-panel-secondary-tab-libraries')).toBeVisible();
+    await expect(window.getByTestId('left-panel-secondary-tab-rtl-regression')).toBeVisible();
+
+    await window.getByTestId('left-panel-secondary-tab-rtl-regression').click();
+    await expect(window.getByTestId('rtl-regression-panel')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-summary-count')).toHaveText('13/32');
+    await expect(window.getByTestId('rtl-regression-group-cpu')).toContainText('cpu');
+    await expect(window.getByTestId('rtl-regression-group-count-cpu')).toHaveText('(8)');
+    await expect(window.getByTestId('rtl-regression-group-ip')).toContainText('ip');
+    await expect(window.getByTestId('rtl-regression-group-count-ip')).toHaveText('(14)');
+    await expect(window.getByTestId('rtl-regression-group-perf')).toContainText('perf');
+    await expect(window.getByTestId('rtl-regression-group-count-perf')).toHaveText('(10)');
+
+    const cpuTestRow = window.getByTestId('rtl-regression-test-row-cpu-reset-vector');
+    await expect(cpuTestRow).toContainText('reset_vector_boot');
+    await expect(cpuTestRow.getByTestId('rtl-regression-status-passed')).toBeVisible();
+    await expect(cpuTestRow).not.toContainText('正确');
+
+    await window.getByTestId('rtl-regression-group-toggle-cpu').click();
+    await expect(cpuTestRow).toHaveCount(0);
+    await window.getByTestId('rtl-regression-group-toggle-cpu').click();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector')).toBeVisible();
+
+    await window.getByTestId('rtl-regression-test-row-cpu-reset-vector').hover();
+    await expect(window.getByRole('button', { name: 'Run simulation reset_vector_boot' })).toBeVisible();
+    await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeVisible();
+    await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').hover();
+    await expect(window.getByRole('tooltip', { name: 'simulate' })).toBeVisible({ timeout: 4500 });
+    await window.getByTestId('rtl-regression-action-debug-cpu-reset-vector').hover();
+    await expect(window.getByRole('tooltip', { name: 'debug' })).toBeVisible({ timeout: 4500 });
+    await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').click();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector')).not.toContainText('进行中');
+    await expect(window.getByRole('button', { name: 'Stop simulation reset_vector_boot' })).toBeVisible();
+    await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeDisabled();
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-ip').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-perf').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+
+    await window.getByTestId('left-panel-secondary-tab-libraries').click();
+    await expect(window.getByTestId('left-panel-libraries-placeholder')).toHaveText('Libraries is empty');
+    await window.getByTestId('left-panel-secondary-tab-rtl-regression').click();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
+
+    await window.getByTestId('rtl-regression-test-row-cpu-reset-vector').hover();
+    await window.getByTestId('rtl-regression-action-simulate-cpu-reset-vector').click();
+    await expect(window.getByRole('button', { name: 'Run simulation reset_vector_boot' })).toBeVisible();
+    await expect(window.getByRole('button', { name: 'Debug reset_vector_boot' })).toBeVisible();
+
+    await window.getByTestId('rtl-regression-group-ip').hover();
+    await window.getByTestId('rtl-regression-group-action-simulate-ip').click();
+    await expect(window.getByRole('button', { name: 'Stop simulation ip' })).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-ip-uart-loopback').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-action-simulate-ip-uart-loopback')).toBeDisabled();
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-cpu').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-perf').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+
+    await window.getByTestId('rtl-regression-group-action-simulate-ip').click();
+    await expect(window.getByRole('button', { name: 'Run simulation ip' })).toBeVisible();
+
+    await window.getByTestId('rtl-regression-action-simulate-all').click();
+    await expect(window.getByRole('button', { name: 'Stop simulation RTL Regression' })).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-cpu-reset-vector').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-ip-uart-loopback').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect(window.getByTestId('rtl-regression-test-row-perf-coremark').getByTestId('rtl-regression-status-running')).toBeVisible();
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-cpu').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await expect.poll(async () => window.getByTestId('rtl-regression-group-action-shell-ip').evaluate((element) => (element as unknown as { getAttribute: (name: string) => string | null }).getAttribute('class')?.includes('opacity-0') ?? false)).toBe(true);
+    await window.getByTestId('rtl-regression-action-simulate-all').click();
+    await expect(window.getByRole('button', { name: 'Run simulation RTL Regression' })).toBeVisible();
+  } finally {
+    await app.close().catch(() => undefined);
+  }
 });
 
 test('lsp panel captures initialization logs when hierarchy opens before any editor', async () => {

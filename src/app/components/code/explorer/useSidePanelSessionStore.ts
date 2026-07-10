@@ -4,7 +4,7 @@ import type { RightSidePanelTab } from './RightSidePanelChrome';
 import { ASSISTANT_THREAD_LIST_DEFAULT_WIDTH_PX } from './assistantPanelLayout';
 import type { ProjectSidePanelSession } from '../../../../../types/project';
 
-export type ExplorerSecondaryPanelTab = 'hierarchy' | 'libraries';
+export type ExplorerSecondaryPanelTab = 'hierarchy' | 'libraries' | 'rtl-regression';
 export type RightPanelSecondaryTab = 'module-info' | 'resource-usage' | 'x-propagation';
 export type PhysicalLeftPanelTab = 'layout' | 'constraints';
 export type PhysicalRightPanelTab = 'layers' | 'checks';

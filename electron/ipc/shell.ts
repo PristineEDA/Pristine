@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, shell as electronShell } from 'electron';
 import * as childProcess from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { AsyncChannels, StreamChannels } from './channels.js';
@@ -19,6 +19,21 @@ const MAX_PROCESSES = 10;
 const processes = new Map<string, ChildProcess>();
 let nextId = 1;
 let projectRoot: string | null = null;
+
+function validateExternalUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('Invalid external URL');
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'mailto:') {
+    throw new Error(`External URL protocol not allowed: ${url.protocol}`);
+  }
+
+  return url.toString();
+}
 
 export function setShellProjectRoot(root: string | null): void {
   projectRoot = root;
@@ -100,5 +115,11 @@ export function registerShellHandlers(getMainWindow: () => BrowserWindow | null)
       return true;
     }
     return false;
+  });
+
+  ipcMain.handle(AsyncChannels.SHELL_OPEN_EXTERNAL, async (_event, url: unknown) => {
+    assertString(url, 'url');
+    await electronShell.openExternal(validateExternalUrl(url));
+    return true;
   });
 }

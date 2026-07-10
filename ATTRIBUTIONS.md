@@ -9,6 +9,7 @@ React（https://github.com/facebook/react）Meta MIT
 React DOM（https://github.com/facebook/react）Meta MIT
 Monaco Editor（https://github.com/microsoft/monaco-editor）Microsoft MIT
 @monaco-editor/react（https://github.com/suren-atoyan/monaco-react）Suren Atoyan MIT
+PDF.js（https://github.com/mozilla/pdf.js）Mozilla Apache-2.0
 @blocksuite/affine（https://github.com/toeverything/AFFiNE/tree/v0.26.3/blocksuite）TOEVERYTHING MIT
 xterm.js（https://github.com/xtermjs/xterm.js）xterm.js MIT
 xterm-addon-fit（https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit）xterm.js MIT

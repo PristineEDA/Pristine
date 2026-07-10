@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import type { WorkspaceGitPathState } from '../../../../../types/workspace-git';
 import { getWorkspaceGitPathState, useWorkspaceGitStatus } from '../../../git/workspaceGitStatus';
-import { getDisplayPathSegments } from '../../../workspace/workspaceFiles';
+import { getDisplayPathSegments, isPdfWorkspaceFile } from '../../../workspace/workspaceFiles';
 import { FileTypeBadge } from './FileTypeBadge';
 import { useEditorDocumentState } from './useEditorDocumentState';
 import {
@@ -55,8 +55,13 @@ function loadMonacoGitDiffPane() {
   return import('./MonacoGitDiffPane');
 }
 
+function loadPdfViewerPane() {
+  return import('./PdfViewerPane');
+}
+
 const MonacoEditorPane = lazy(() => loadMonacoEditorPane().then((module) => ({ default: module.MonacoEditorPane })));
 const MonacoGitDiffPane = lazy(() => loadMonacoGitDiffPane().then((module) => ({ default: module.MonacoGitDiffPane })));
+const PdfViewerPane = lazy(() => loadPdfViewerPane().then((module) => ({ default: module.PdfViewerPane })));
 
 interface EditorAreaTab extends Omit<WorkspaceEditorTab, 'isPinned'> {
   isPinned?: boolean;
@@ -347,6 +352,7 @@ export function EditorArea({
     ? getEditorTabDocumentId(activeWorkspaceTab)
     : documentTabId ?? activeTabId;
   const activeSourceFileId = activeWorkspaceTab ? getEditorTabSourceFileId(activeWorkspaceTab) : resolvedActiveDocumentId;
+  const isActivePdfTab = !isActiveGitDiffTab && isPdfWorkspaceFile(resolvedActiveDocumentId || activeTabId);
   const lastAppliedRestoreRef = useRef({ activeTabId: '', restoreToken: 0 });
   const [activeInlineGitDiffSummary, setActiveInlineGitDiffSummary] = useState<InlineGitDiffSummary | null>(null);
   const [activeModelReadyId, setActiveModelReadyId] = useState('');
@@ -367,6 +373,7 @@ export function EditorArea({
     loadErrors,
     onLoadFile,
     onContentChange,
+    shouldLoadDocument: !isActivePdfTab,
   });
   const breadcrumbSegments = activeEditorTab ? getDisplayPathSegments(resolvedActiveDocumentId || activeTabId, activeEditorTab.name) : [];
   const breadcrumbDiffFontStyle = {
@@ -621,6 +628,21 @@ export function EditorArea({
           <MonacoGitDiffPane
             filePath={resolvedActiveDocumentId}
             onEditorMount={onEditorMount}
+            showDragInteractionShield={showDragInteractionShield}
+            dragInteractionShieldTestId={dragInteractionShieldTestId}
+          />
+        </Suspense>
+      ) : isActivePdfTab && resolvedActiveDocumentId && activeEditorTab ? (
+        <Suspense
+          fallback={(
+            <div className="flex flex-1 items-center justify-center bg-ide-editor-bg text-ide-text-muted text-[12px]">
+              Loading PDF viewer...
+            </div>
+          )}
+        >
+          <PdfViewerPane
+            fileId={resolvedActiveDocumentId}
+            fileName={activeEditorTab.name}
             showDragInteractionShield={showDragInteractionShield}
             dragInteractionShieldTestId={dragInteractionShieldTestId}
           />

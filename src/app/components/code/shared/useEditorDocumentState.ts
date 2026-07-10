@@ -16,6 +16,7 @@ interface UseEditorDocumentStateOptions {
   loadErrors?: Record<string, string>;
   onLoadFile?: (fileId: string) => void;
   onContentChange?: (fileId: string, content: string) => void;
+  shouldLoadDocument?: boolean;
 }
 
 export function useEditorDocumentState({
@@ -27,6 +28,7 @@ export function useEditorDocumentState({
   loadErrors,
   onLoadFile,
   onContentChange,
+  shouldLoadDocument = true,
 }: UseEditorDocumentStateOptions) {
   const [localContentCache, setLocalContentCache] = useState<Record<string, string>>({});
   const [localLoadingFiles, setLocalLoadingFiles] = useState<Record<string, boolean>>({});
@@ -56,6 +58,10 @@ export function useEditorDocumentState({
   }, []);
 
   useEffect(() => {
+    if (!shouldLoadDocument) {
+      return;
+    }
+
     if (!effectiveTabId || activeTabContent !== undefined || inFlightLoadsRef.current.has(effectiveTabId)) {
       return;
     }
@@ -124,7 +130,7 @@ export function useEditorDocumentState({
 
         setLocalLoadingFiles((current) => ({ ...current, [effectiveTabId]: false }));
       });
-  }, [activeTabContent, effectiveTabId, onLoadFile]);
+  }, [activeTabContent, effectiveTabId, onLoadFile, shouldLoadDocument]);
 
   const updateContent = (value: string) => {
     if (!effectiveTabId) {

@@ -192,9 +192,9 @@
         };
         const parseScrimIntensity = (value) => {
           const parsed = Number(value);
-          return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
+          return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0.25;
         };
-        const parseProgressVisible = (value) => value !== 'false';
+        const parseProgressVisible = (value) => value === 'true';
         const parseProgressGlassVisible = (value) => value !== 'false';
         const parseProgressPanelOpacity = (value) => {
           const parsed = Number(value);

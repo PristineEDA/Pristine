@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { Library, ListTree, RefreshCw } from 'lucide-react';
+import { Library, ListChecks, ListTree, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspaceGitStatus } from '../../../git/workspaceGitStatus';
 import { FileTreeNode, type ExplorerContextMenuRequest } from './FileTreeNode';
 import { ExplorerPanelTabs } from './LeftSidePanelChrome';
 import { HierarchyPanel } from './HierarchyPanel';
+import { RtlRegressionPanel } from './RtlRegressionPanel';
 import { SPLIT_PANEL_CONTENT_TRANSITION_STYLE, useAnimatedSplitPanelPresence } from './useAnimatedSplitPanelPresence';
 import { useSidePanelSessionStore, type ExplorerSecondaryPanelTab } from './useSidePanelSessionStore';
 import { useCodeViewerLayout } from '../../../context/CodeViewerLayoutContext';
@@ -69,6 +70,7 @@ export {
 const explorerSecondaryPanelTabs = [
   { value: 'hierarchy', label: 'Hierarchy', icon: ListTree, testId: 'left-panel-secondary-tab-hierarchy' },
   { value: 'libraries', label: 'Libraries', icon: Library, testId: 'left-panel-secondary-tab-libraries' },
+  { value: 'rtl-regression', label: 'RTL Regression', icon: ListChecks, testId: 'left-panel-secondary-tab-rtl-regression' },
 ] as const;
 
 interface LeftSidePanelProps {
@@ -964,6 +966,8 @@ function ExplorerSecondaryPanel({
           refreshToken={hierarchyRefreshToken}
           workspaceAvailable={workspaceAvailable}
         />
+      ) : secondaryTab === 'rtl-regression' ? (
+        <RtlRegressionPanel />
       ) : (
         <div
           data-testid="left-panel-libraries-placeholder"

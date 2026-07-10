@@ -22,7 +22,7 @@ export interface ProjectConfig {
 }
 
 export type ProjectExplorerLeftTab = 'explorer' | 'git';
-export type ProjectExplorerLeftSecondaryTab = 'hierarchy' | 'libraries';
+export type ProjectExplorerLeftSecondaryTab = 'hierarchy' | 'libraries' | 'rtl-regression';
 export type ProjectExplorerRightTab = 'ai' | 'static' | 'references' | 'outline';
 export type ProjectExplorerRightSecondaryTab = 'module-info' | 'resource-usage' | 'x-propagation';
 export type ProjectPhysicalLeftTab = 'layout' | 'constraints';
