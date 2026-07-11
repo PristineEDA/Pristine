@@ -590,6 +590,58 @@ describe('PdfViewerPane', () => {
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-zoom-indicator')).toHaveTextContent('100%'));
   });
 
+  it('switches between PDF scroll modes while keeping the current page', async () => {
+    const pdfDocument = createMockPdfDocument(3);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    const viewport = await screen.findByTestId('pdf-viewer-scroll-viewport');
+    const pageLayout = screen.getByTestId('pdf-viewer-page-layout');
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-vertical')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-page')).toHaveTextContent('');
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-horizontal')).toHaveTextContent('');
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-wrapped')).toHaveTextContent('');
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-next-page'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3'));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-horizontal'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'horizontal'));
+    expect(pageLayout).toHaveAttribute('data-scroll-mode', 'horizontal');
+    expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3');
+
+    viewport.scrollLeft = 0;
+    fireEvent.wheel(viewport, { deltaY: 72 });
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').scrollLeft).toBe(72);
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-wrapped'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'wrapped'));
+    expect(pageLayout).toHaveAttribute('data-scroll-mode', 'wrapped');
+    expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3');
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-page'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'page'));
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-3')).not.toBeInTheDocument();
+
+    fireEvent.wheel(viewport, { deltaY: 120 });
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('3 / 3'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-3')).toBeInTheDocument());
+
+    fireEvent.keyDown(viewport, { key: 'Home' });
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-vertical'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'vertical'));
+    expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-3')).toBeInTheDocument();
+  });
+
   it('enters presentation mode, navigates pages, and restores the previous viewer session on exit', async () => {
     const pdfDocument = createMockPdfDocument(3);
     mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });

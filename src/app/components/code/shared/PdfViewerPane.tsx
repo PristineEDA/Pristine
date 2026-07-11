@@ -31,12 +31,15 @@ import {
   PanelLeft,
   PanelRight,
   PanelTop,
+  Rows3,
+  Columns3,
   Presentation,
   RotateCcw,
   RotateCw,
   ScanText,
   Search,
   TextCursorInput,
+  WrapText,
   Type,
   X,
   ZoomIn,
@@ -55,6 +58,7 @@ import {
   type PdfViewerPageToneMode,
   type PdfViewerPresentationRestoreState,
   type PdfViewerRotation,
+  type PdfViewerScrollMode,
   type PdfViewerToolMode,
   usePdfViewerStore,
 } from '../../../pdf/usePdfViewerStore';
@@ -84,6 +88,8 @@ const PDF_SELECTION_TOOLBAR_HEIGHT_PX = 38;
 const PDF_SELECTION_TOOLBAR_GAP_PX = 7;
 const PDF_PRESENTATION_WHEEL_THRESHOLD_PX = 80;
 const PDF_PRESENTATION_WHEEL_COOLDOWN_MS = 500;
+const PDF_PAGE_SCROLL_WHEEL_THRESHOLD_PX = 80;
+const PDF_PAGE_SCROLL_WHEEL_COOLDOWN_MS = 250;
 
 const PDF_VIEWER_PAGE_TONE_OPTIONS: Array<{ value: PdfViewerPageToneMode; label: string }> = [
   { value: 'auto', label: 'Auto' },
@@ -476,21 +482,42 @@ function getViewportPageNumber(
   pageCount: number,
   pageSizes: Record<number, PdfPageSize>,
   zoom: number,
+  scrollMode: PdfViewerScrollMode,
+  currentPageNumber: number,
 ): number {
   if (pageCount <= 0) {
     return 1;
   }
 
-  const viewportCenter = viewport.scrollTop + viewport.clientHeight / 2;
+  if (scrollMode === 'page') {
+    return currentPageNumber;
+  }
+
+  const viewportCenterX = viewport.scrollLeft + viewport.clientWidth / 2;
+  const viewportCenterY = viewport.scrollTop + viewport.clientHeight / 2;
   let closestPage = 1;
   let closestDistance = Number.POSITIVE_INFINITY;
 
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
     const pageElement = viewport.querySelector<HTMLElement>(`[data-pdf-page-number="${pageNumber}"]`);
-    const pageTop = pageElement?.offsetTop || getPageOffsetTop(pageSizes, pageNumber, zoom);
+    const pageTop = pageElement && (
+      scrollMode === 'horizontal'
+      || scrollMode === 'wrapped'
+      || pageNumber === 1
+      || pageElement.offsetTop > 0
+    )
+      ? pageElement.offsetTop
+      : getPageOffsetTop(pageSizes, pageNumber, zoom);
     const pageHeight = pageElement?.offsetHeight || getPageSize(pageSizes, pageNumber, zoom).height;
-    const pageCenter = pageTop + pageHeight / 2;
-    const distance = Math.abs(pageCenter - viewportCenter);
+    const pageLeft = pageElement?.offsetLeft ?? 0;
+    const pageWidth = pageElement?.offsetWidth || getPageSize(pageSizes, pageNumber, zoom).width;
+    const pageCenterX = pageLeft + pageWidth / 2;
+    const pageCenterY = pageTop + pageHeight / 2;
+    const distance = scrollMode === 'horizontal'
+      ? Math.abs(pageCenterX - viewportCenterX)
+      : scrollMode === 'wrapped'
+        ? Math.hypot(pageCenterX - viewportCenterX, pageCenterY - viewportCenterY)
+        : Math.abs(pageCenterY - viewportCenterY);
 
     if (distance < closestDistance) {
       closestDistance = distance;
@@ -1417,6 +1444,9 @@ export function PdfViewerPane({
   const presentationRestoreRef = useRef<PdfViewerPresentationRestoreState | null>(null);
   const presentationWheelDeltaRef = useRef(0);
   const presentationWheelTimeStampRef = useRef(0);
+  const pageScrollWheelDeltaRef = useRef(0);
+  const pageScrollWheelTimeStampRef = useRef(0);
+  const scrollModeRestorePageRef = useRef<number | null>(null);
   const handDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -1455,6 +1485,7 @@ export function PdfViewerPane({
     pageToneMode,
     rotation,
     searchQuery,
+    scrollMode,
     toolMode,
     zoom,
   } = usePdfViewerStore((state) => state.getSession(fileId));
@@ -1474,6 +1505,7 @@ export function PdfViewerPane({
   const setInfoPanelOpen = usePdfViewerStore((state) => state.setInfoPanelOpen);
   const setSearchQuery = usePdfViewerStore((state) => state.setSearchQuery);
   const setPageToneMode = usePdfViewerStore((state) => state.setPageToneMode);
+  const setScrollMode = usePdfViewerStore((state) => state.setScrollMode);
   const setToolMode = usePdfViewerStore((state) => state.setToolMode);
   const setZoom = usePdfViewerStore((state) => state.setZoom);
   const canGoPrevious = pageNumber > 1;
@@ -1485,8 +1517,8 @@ export function PdfViewerPane({
     [pageCount],
   );
   const visiblePageNumbers = useMemo(
-    () => (isPresentationModeActive && pageCount > 0 ? [pageNumber] : pageNumbers),
-    [isPresentationModeActive, pageCount, pageNumber, pageNumbers],
+    () => ((isPresentationModeActive || scrollMode === 'page') && pageCount > 0 ? [pageNumber] : pageNumbers),
+    [isPresentationModeActive, pageCount, pageNumber, pageNumbers, scrollMode],
   );
   const renderedPageRange = useMemo(() => ({
     start: Math.max(1, pageNumber - PDF_VIEWER_RENDER_OVERSCAN),
@@ -1526,6 +1558,10 @@ export function PdfViewerPane({
   const resetPresentationWheelState = useCallback(() => {
     presentationWheelDeltaRef.current = 0;
     presentationWheelTimeStampRef.current = 0;
+  }, []);
+  const resetPageScrollWheelState = useCallback(() => {
+    pageScrollWheelDeltaRef.current = 0;
+    pageScrollWheelTimeStampRef.current = 0;
   }, []);
   const addHighlightFromCurrentSelection = useCallback((options: { requireSinglePage?: boolean } = {}) => {
     const selectionInfo = getPdfSelectionInfo(viewportRef.current, zoom, options);
@@ -1603,8 +1639,15 @@ export function PdfViewerPane({
     setIsPdfDocumentInfoLoading(false);
     presentationRestoreRef.current = null;
     resetPresentationWheelState();
+    resetPageScrollWheelState();
     hideSelectionToolbar();
-  }, [fileId, hideSelectionToolbar, reloadToken, resetPresentationWheelState]);
+  }, [
+    fileId,
+    hideSelectionToolbar,
+    reloadToken,
+    resetPageScrollWheelState,
+    resetPresentationWheelState,
+  ]);
 
   useEffect(() => {
     setPageSizes({});
@@ -1855,13 +1898,24 @@ export function PdfViewerPane({
     });
     setPageNumberFromViewport(
       fileId,
-      getViewportPageNumber(viewport, pageCount, pageSizes, zoom),
+      getViewportPageNumber(viewport, pageCount, pageSizes, zoom, scrollMode, pageNumber),
       pageCount,
     );
-  }, [fileId, hideSelectionToolbar, pageCount, pageSizes, setPageNumberFromViewport, setScrollPosition, zoom]);
+  }, [
+    fileId,
+    hideSelectionToolbar,
+    pageCount,
+    pageNumber,
+    pageSizes,
+    scrollMode,
+    setPageNumberFromViewport,
+    setScrollPosition,
+    zoom,
+  ]);
 
   const scrollToPage = useCallback((nextPageNumber: number) => {
     const viewport = viewportRef.current;
+    scrollModeRestorePageRef.current = null;
     if (!viewport) {
       setPageNumber(fileId, nextPageNumber, pageCount);
       return;
@@ -1869,14 +1923,51 @@ export function PdfViewerPane({
 
     const normalizedPageNumber = Math.min(Math.max(nextPageNumber, 1), Math.max(pageCount, 1));
     const pageElement = viewport.querySelector<HTMLElement>(`[data-pdf-page-number="${normalizedPageNumber}"]`);
-    const nextScrollTop = pageElement?.offsetTop || getPageOffsetTop(pageSizes, normalizedPageNumber, zoom);
-    setViewportScroll(viewport, viewport.scrollLeft, nextScrollTop);
+    const pageSize = getPageSize(pageSizes, normalizedPageNumber, zoom);
+    const pageLeft = pageElement?.offsetLeft ?? 0;
+    const pageTop = pageElement?.offsetTop ?? getPageOffsetTop(pageSizes, normalizedPageNumber, zoom);
+    const pageWidth = pageElement?.offsetWidth || pageSize.width;
+    let nextScrollLeft = viewport.scrollLeft;
+    let nextScrollTop = viewport.scrollTop;
+
+    if (scrollMode === 'page') {
+      nextScrollLeft = 0;
+      nextScrollTop = 0;
+    } else if (scrollMode === 'horizontal') {
+      nextScrollLeft = pageLeft;
+      nextScrollTop = 0;
+    } else if (scrollMode === 'wrapped') {
+      nextScrollLeft = Math.max(0, pageLeft - Math.max(0, (viewport.clientWidth - pageWidth) / 2));
+      nextScrollTop = pageTop;
+    } else {
+      nextScrollTop = pageTop;
+    }
+
+    setViewportScroll(viewport, nextScrollLeft, nextScrollTop);
     setScrollPosition(fileId, {
-      scrollLeft: viewport.scrollLeft,
+      scrollLeft: nextScrollLeft,
       scrollTop: nextScrollTop,
     });
     setPageNumber(fileId, normalizedPageNumber, pageCount);
-  }, [fileId, pageCount, pageSizes, setPageNumber, setScrollPosition, zoom]);
+  }, [fileId, pageCount, pageSizes, scrollMode, setPageNumber, setScrollPosition, zoom]);
+
+  useEffect(() => {
+    const targetPageNumber = scrollModeRestorePageRef.current;
+    if (targetPageNumber === null || isPresentationModeActive) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      if (scrollModeRestorePageRef.current !== targetPageNumber) {
+        return;
+      }
+
+      scrollToPage(targetPageNumber);
+      scrollModeRestorePageRef.current = null;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isPresentationModeActive, scrollMode, scrollToPage]);
 
   const createPresentationRestoreState = useCallback((): PdfViewerPresentationRestoreState => {
     const viewport = viewportRef.current;
@@ -2187,6 +2278,53 @@ export function PdfViewerPane({
       return;
     }
 
+    if (scrollMode === 'page') {
+      event.preventDefault();
+      const currentTime = Date.now();
+      if (
+        pageScrollWheelTimeStampRef.current > 0
+        && currentTime - pageScrollWheelTimeStampRef.current < PDF_PAGE_SCROLL_WHEEL_COOLDOWN_MS
+      ) {
+        return;
+      }
+
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (
+        (pageScrollWheelDeltaRef.current > 0 && delta < 0)
+        || (pageScrollWheelDeltaRef.current < 0 && delta > 0)
+      ) {
+        pageScrollWheelDeltaRef.current = 0;
+      }
+
+      pageScrollWheelDeltaRef.current += delta;
+      if (Math.abs(pageScrollWheelDeltaRef.current) < PDF_PAGE_SCROLL_WHEEL_THRESHOLD_PX) {
+        return;
+      }
+
+      const totalDelta = pageScrollWheelDeltaRef.current;
+      pageScrollWheelDeltaRef.current = 0;
+      if (totalDelta > 0 && canGoNext) {
+        scrollToPage(pageNumber + 1);
+        pageScrollWheelTimeStampRef.current = currentTime;
+      } else if (totalDelta < 0 && canGoPrevious) {
+        scrollToPage(pageNumber - 1);
+        pageScrollWheelTimeStampRef.current = currentTime;
+      }
+      return;
+    }
+
+    if (scrollMode === 'horizontal') {
+      event.preventDefault();
+      const viewport = event.currentTarget;
+      const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      setViewportScroll(viewport, viewport.scrollLeft + horizontalDelta, viewport.scrollTop);
+      setScrollPosition(fileId, {
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+      });
+      return;
+    }
+
     if (event.shiftKey) {
       event.preventDefault();
       const viewport = event.currentTarget;
@@ -2203,6 +2341,7 @@ export function PdfViewerPane({
     fileId,
     isPresentationModeActive,
     pageNumber,
+    scrollMode,
     scrollToPage,
     setScrollPosition,
     updateZoom,
@@ -2351,11 +2490,36 @@ export function PdfViewerPane({
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
       event.preventDefault();
       setSearchOpen(fileId, true);
+      return;
+    }
+
+    if (scrollMode !== 'page') {
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      scrollToPage(1);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      scrollToPage(pageCount);
+    } else if ((event.key === 'ArrowDown' || event.key === 'PageDown') && canGoNext) {
+      event.preventDefault();
+      scrollToPage(pageNumber + 1);
+    } else if ((event.key === 'ArrowUp' || event.key === 'PageUp') && canGoPrevious) {
+      event.preventDefault();
+      scrollToPage(pageNumber - 1);
     }
   }, [
+    canGoNext,
+    canGoPrevious,
     fileId,
     handlePresentationKeyCommand,
     isPresentationModeActive,
+    pageCount,
+    pageNumber,
+    scrollMode,
+    scrollToPage,
     setSearchOpen,
   ]);
 
@@ -2393,6 +2557,16 @@ export function PdfViewerPane({
   };
   const handleRotateClockwise = () => handleRotate(90);
   const handleRotateCounterclockwise = () => handleRotate(-90);
+  const handleScrollModeChange = (nextScrollMode: PdfViewerScrollMode) => {
+    if (scrollMode === nextScrollMode) {
+      return;
+    }
+
+    hideSelectionToolbar();
+    resetPageScrollWheelState();
+    scrollModeRestorePageRef.current = pageNumber;
+    setScrollMode(fileId, nextScrollMode);
+  };
   const handlePresentationMode = () => {
     if (isPresentationModeActive) {
       const currentPageNumber = usePdfViewerStore.getState().getSession(fileId).pageNumber;
@@ -2512,6 +2686,71 @@ export function PdfViewerPane({
               ].join(' ')}
             >
               <PanelRight size={14} />
+            </button>
+          </TooltipIconButton>
+          <div className="mx-1 h-4 w-px bg-ide-border" />
+          <TooltipIconButton content="Page Scrolling">
+            <button
+              type="button"
+              aria-label="Page Scrolling"
+              aria-pressed={scrollMode === 'page'}
+              data-testid="pdf-viewer-scroll-mode-page"
+              disabled={isLoading || !pdfDocument}
+              onClick={() => handleScrollModeChange('page')}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                scrollMode === 'page' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <PanelTop size={14} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Vertical Scrolling">
+            <button
+              type="button"
+              aria-label="Vertical Scrolling"
+              aria-pressed={scrollMode === 'vertical'}
+              data-testid="pdf-viewer-scroll-mode-vertical"
+              disabled={isLoading || !pdfDocument}
+              onClick={() => handleScrollModeChange('vertical')}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                scrollMode === 'vertical' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <Rows3 size={14} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Horizontal Scrolling">
+            <button
+              type="button"
+              aria-label="Horizontal Scrolling"
+              aria-pressed={scrollMode === 'horizontal'}
+              data-testid="pdf-viewer-scroll-mode-horizontal"
+              disabled={isLoading || !pdfDocument}
+              onClick={() => handleScrollModeChange('horizontal')}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                scrollMode === 'horizontal' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <Columns3 size={14} />
+            </button>
+          </TooltipIconButton>
+          <TooltipIconButton content="Wrapped Scrolling">
+            <button
+              type="button"
+              aria-label="Wrapped Scrolling"
+              aria-pressed={scrollMode === 'wrapped'}
+              data-testid="pdf-viewer-scroll-mode-wrapped"
+              disabled={isLoading || !pdfDocument}
+              onClick={() => handleScrollModeChange('wrapped')}
+              className={[
+                'rounded p-1 transition-colors hover:bg-ide-hover disabled:cursor-default disabled:opacity-40',
+                scrollMode === 'wrapped' ? 'bg-ide-hover text-ide-text' : 'text-ide-text-muted hover:text-ide-text',
+              ].join(' ')}
+            >
+              <WrapText size={14} />
             </button>
           </TooltipIconButton>
           <div className="mx-1 h-4 w-px bg-ide-border" />
@@ -2904,6 +3143,7 @@ export function PdfViewerPane({
           <div
             ref={viewportRef}
             data-testid="pdf-viewer-scroll-viewport"
+            data-scroll-mode={scrollMode}
             tabIndex={0}
             onKeyDown={handleKeyDown}
             onKeyUp={scheduleSelectionToolbarUpdate}
@@ -2922,8 +3162,23 @@ export function PdfViewerPane({
               !isPresentationModeActive && toolMode === 'hand' ? (isHandDragging ? 'cursor-grabbing' : 'cursor-grab') : '',
             ].join(' ')}
           >
-            <div className={isPresentationModeActive ? 'flex min-h-full min-w-full items-center justify-center px-6 py-6' : 'min-w-full px-6 py-6'}>
-              <div className="relative mx-auto w-max max-w-none">
+            <div
+              className={[
+                isPresentationModeActive ? 'flex min-h-full min-w-full items-center justify-center px-6 py-6' : '',
+                !isPresentationModeActive && scrollMode === 'horizontal' ? 'min-h-full min-w-max px-6 py-6' : '',
+                !isPresentationModeActive && scrollMode !== 'horizontal' ? 'min-w-full px-6 py-6' : '',
+              ].join(' ')}
+            >
+              <div
+                data-testid="pdf-viewer-page-layout"
+                data-scroll-mode={scrollMode}
+                className={[
+                  'relative max-w-none',
+                  isPresentationModeActive || scrollMode === 'page' || scrollMode === 'vertical' ? 'mx-auto w-max' : '',
+                  !isPresentationModeActive && scrollMode === 'horizontal' ? 'flex w-max min-h-full items-start gap-6' : '',
+                  !isPresentationModeActive && scrollMode === 'wrapped' ? 'flex w-full flex-wrap items-start justify-center gap-6' : '',
+                ].join(' ')}
+              >
                 {isLoading && (
                   <div
                     data-testid="pdf-viewer-loading"
@@ -2949,8 +3204,11 @@ export function PdfViewerPane({
                       key={currentPageNumber}
                       data-pdf-page-number={currentPageNumber}
                       data-testid={`pdf-viewer-page-${currentPageNumber}`}
-                      className="flex justify-center"
-                      style={{ marginBottom: PDF_VIEWER_PAGE_GAP_PX }}
+                      className={[
+                        'flex justify-center',
+                        scrollMode === 'horizontal' || scrollMode === 'wrapped' ? 'shrink-0' : '',
+                      ].join(' ')}
+                      style={scrollMode === 'vertical' ? { marginBottom: PDF_VIEWER_PAGE_GAP_PX } : undefined}
                     >
                       <div
                         className="relative"

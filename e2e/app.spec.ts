@@ -4738,6 +4738,59 @@ test('explorer opens a file into a new editor tab', async () => {
   await app.close();
 });
 
+test('PDF viewer switches page scrolling modes', async () => {
+  const pdfBuffer = createE2EPdfBuffer();
+  const projectRoot = createWorkspaceCopyWithFiles('pdf-scroll-mode-project', {
+    'docs/spec.pdf': pdfBuffer,
+  });
+  const { app, window } = await launchApp({ projectRoot });
+
+  await ensureExplorerVisible(window);
+  await openNestedWorkspaceFile(window, [
+    toWorkspaceTreeTestId('docs'),
+    toWorkspaceTreeTestId('docs/spec.pdf'),
+  ]);
+
+  const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
+  const pageLayout = window.getByTestId('pdf-viewer-page-layout');
+  await expect(viewport).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-scroll-mode-vertical')).toHaveAttribute('aria-pressed', 'true');
+
+  await window.getByTestId('pdf-viewer-next-page').click();
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  for (const mode of ['horizontal', 'wrapped', 'page'] as const) {
+    await window.getByTestId(`pdf-viewer-scroll-mode-${mode}`).click();
+    await expect(viewport).toHaveAttribute('data-scroll-mode', mode);
+    await expect(pageLayout).toHaveAttribute('data-scroll-mode', mode);
+    await expect(window.getByTestId(`pdf-viewer-scroll-mode-${mode}`)).toHaveAttribute('aria-pressed', 'true');
+    await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('2 / 2');
+  }
+
+  await expect(window.getByTestId('pdf-viewer-page-2')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-page-1')).toHaveCount(0);
+  await viewport.dispatchEvent('wheel', {
+    bubbles: true,
+    cancelable: true,
+    deltaY: -120,
+  });
+  await expect(window.getByTestId('pdf-viewer-page-indicator')).toContainText('1 / 2', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
+  await window.getByTestId('pdf-viewer-scroll-mode-vertical').click();
+  await expect(viewport).toHaveAttribute('data-scroll-mode', 'vertical');
+  await expect(window.getByTestId('pdf-viewer-page-1')).toBeAttached();
+  await expect(window.getByTestId('pdf-viewer-page-2')).toBeAttached();
+
+  await app.close();
+});
+
 test('file tree opens PDF files in the center editor tab', async () => {
   const pdfBuffer = createE2EPdfBuffer();
   const projectRoot = createWorkspaceCopyWithFiles('pdf-viewer-project', {

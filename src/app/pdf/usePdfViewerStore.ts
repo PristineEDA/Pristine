@@ -10,6 +10,7 @@ export type PdfViewerFitMode = 'custom' | 'width' | 'page';
 export type PdfViewerToolMode = 'select' | 'hand';
 export type PdfViewerPageToneMode = 'auto' | 'original' | 'soft';
 export type PdfViewerRotation = 0 | 90 | 180 | 270;
+export type PdfViewerScrollMode = 'page' | 'vertical' | 'horizontal' | 'wrapped';
 
 export interface PdfHighlightRect {
   left: number;
@@ -48,6 +49,7 @@ export interface PdfViewerSession {
   rotation: PdfViewerRotation;
   fitMode: PdfViewerFitMode;
   toolMode: PdfViewerToolMode;
+  scrollMode: PdfViewerScrollMode;
   pageToneMode: PdfViewerPageToneMode;
   scrollTop: number;
   scrollLeft: number;
@@ -80,6 +82,7 @@ interface PdfViewerStoreState {
   ) => void;
   setFitMode: (fileId: string, fitMode: PdfViewerFitMode) => void;
   setToolMode: (fileId: string, toolMode: PdfViewerToolMode) => void;
+  setScrollMode: (fileId: string, scrollMode: PdfViewerScrollMode) => void;
   setPageToneMode: (fileId: string, mode: PdfViewerPageToneMode) => void;
   setSearchOpen: (fileId: string, isOpen: boolean) => void;
   setInfoPanelOpen: (fileId: string, isOpen: boolean) => void;
@@ -127,6 +130,14 @@ function normalizeFitMode(fitMode: PdfViewerFitMode): PdfViewerFitMode {
 
 function normalizeToolMode(toolMode: PdfViewerToolMode): PdfViewerToolMode {
   return toolMode === 'hand' ? 'hand' : 'select';
+}
+
+function normalizeScrollMode(scrollMode: PdfViewerScrollMode): PdfViewerScrollMode {
+  if (scrollMode === 'page' || scrollMode === 'horizontal' || scrollMode === 'wrapped') {
+    return scrollMode;
+  }
+
+  return 'vertical';
 }
 
 function normalizePageToneMode(mode: PdfViewerPageToneMode): PdfViewerPageToneMode {
@@ -182,6 +193,7 @@ const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   rotation: 0,
   fitMode: 'custom',
   toolMode: 'select',
+  scrollMode: 'vertical',
   pageToneMode: 'auto',
   scrollTop: 0,
   scrollLeft: 0,
@@ -437,6 +449,29 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           [fileId]: {
             ...current,
             toolMode: nextToolMode,
+          },
+        },
+      };
+    });
+  },
+  setScrollMode: (fileId, scrollMode) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const nextScrollMode = normalizeScrollMode(scrollMode);
+      if (current.scrollMode === nextScrollMode) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            scrollMode: nextScrollMode,
           },
         },
       };
