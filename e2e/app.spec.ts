@@ -4900,6 +4900,18 @@ test('file tree opens PDF files in the center editor tab', async () => {
   await expect(window.getByTestId('pdf-viewer-page-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   await expect(window.getByTestId('pdf-viewer-page-2')).toHaveCount(0);
 
+  const presentationViewport = window.getByTestId('pdf-viewer-scroll-viewport');
+  await presentationViewport.hover();
+  await window.mouse.wheel(0, 240);
+  await expect(window.getByTestId('pdf-viewer-page-2')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-1')).toHaveCount(0);
+  await window.waitForTimeout(550);
+  await expect(window.getByTestId('pdf-viewer-page-2')).toBeVisible();
+
+  await window.mouse.wheel(0, -240);
+  await expect(window.getByTestId('pdf-viewer-page-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-page-2')).toHaveCount(0);
+
   await window.keyboard.press('Escape');
   await expect(window.getByTestId('pdf-viewer-pane')).not.toHaveAttribute('data-pdf-presentation-mode', 'true', {
     timeout: UI_READY_TIMEOUT_MS,

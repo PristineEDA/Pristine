@@ -684,9 +684,27 @@ describe('PdfViewerPane', () => {
     await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(1));
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument());
 
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     fireEvent.wheel(viewport, {
       deltaY: 120,
     });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-1')).not.toBeInTheDocument();
+
+    viewport.scrollTop = 0;
+    viewport.scrollLeft = 0;
+    fireEvent.scroll(viewport);
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+
+    dateNowSpy.mockReturnValue(1_600);
+    fireEvent.wheel(viewport, { deltaY: -120 });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(1));
+    expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument();
+
+    dateNowSpy.mockReturnValue(2_200);
+    fireEvent.wheel(viewport, { deltaY: 120 });
     await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
       isPresentationModeActive: true,

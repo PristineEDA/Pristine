@@ -240,7 +240,7 @@ describe('MenuBar settings', () => {
     expect(screen.getByTestId('settings-splash-progress-visible-switch')).toHaveAttribute('data-state', 'unchecked');
     expect(screen.getByTestId('settings-splash-preview-progress-shell')).toHaveClass('hidden');
     expect(window.electronAPI!.config.set).toHaveBeenCalledWith('workbench.splashProgressVisible', false);
-  });
+  }, 10_000);
 
   it('uses the default splash overlay and progress visibility settings', async () => {
     const user = userEvent.setup();

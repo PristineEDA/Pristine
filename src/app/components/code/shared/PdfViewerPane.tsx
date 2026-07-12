@@ -1892,6 +1892,10 @@ export function PdfViewerPane({
   const handleViewportScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const viewport = event.currentTarget;
     hideSelectionToolbar();
+    if (isPresentationModeActive) {
+      return;
+    }
+
     setScrollPosition(fileId, {
       scrollLeft: viewport.scrollLeft,
       scrollTop: viewport.scrollTop,
@@ -1904,6 +1908,7 @@ export function PdfViewerPane({
   }, [
     fileId,
     hideSelectionToolbar,
+    isPresentationModeActive,
     pageCount,
     pageNumber,
     pageSizes,
@@ -1916,12 +1921,22 @@ export function PdfViewerPane({
   const scrollToPage = useCallback((nextPageNumber: number) => {
     const viewport = viewportRef.current;
     scrollModeRestorePageRef.current = null;
+    const normalizedPageNumber = Math.min(Math.max(nextPageNumber, 1), Math.max(pageCount, 1));
     if (!viewport) {
-      setPageNumber(fileId, nextPageNumber, pageCount);
+      setPageNumber(fileId, normalizedPageNumber, pageCount);
       return;
     }
 
-    const normalizedPageNumber = Math.min(Math.max(nextPageNumber, 1), Math.max(pageCount, 1));
+    if (isPresentationModeActive) {
+      setViewportScroll(viewport, 0, 0);
+      setScrollPosition(fileId, {
+        scrollLeft: 0,
+        scrollTop: 0,
+      });
+      setPageNumber(fileId, normalizedPageNumber, pageCount);
+      return;
+    }
+
     const pageElement = viewport.querySelector<HTMLElement>(`[data-pdf-page-number="${normalizedPageNumber}"]`);
     const pageSize = getPageSize(pageSizes, normalizedPageNumber, zoom);
     const pageLeft = pageElement?.offsetLeft ?? 0;
@@ -1949,7 +1964,7 @@ export function PdfViewerPane({
       scrollTop: nextScrollTop,
     });
     setPageNumber(fileId, normalizedPageNumber, pageCount);
-  }, [fileId, pageCount, pageSizes, scrollMode, setPageNumber, setScrollPosition, zoom]);
+  }, [fileId, isPresentationModeActive, pageCount, pageSizes, scrollMode, setPageNumber, setScrollPosition, zoom]);
 
   useEffect(() => {
     const targetPageNumber = scrollModeRestorePageRef.current;
