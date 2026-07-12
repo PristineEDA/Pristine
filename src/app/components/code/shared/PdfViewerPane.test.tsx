@@ -647,8 +647,8 @@ describe('PdfViewerPane', () => {
     render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-last-page')).toBeEnabled());
     expect(screen.getByTestId('pdf-viewer-first-page')).toBeDisabled();
-    expect(screen.getByTestId('pdf-viewer-last-page')).toBeEnabled();
 
     fireEvent.click(screen.getByTestId('pdf-viewer-last-page'));
 
