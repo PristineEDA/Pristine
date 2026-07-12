@@ -5,10 +5,12 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type Dispatch,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
   type RefObject,
+  type SetStateAction,
   type UIEvent,
   type WheelEvent,
 } from 'react';
@@ -81,7 +83,10 @@ const PDF_VIEWER_RENDER_OVERSCAN = 2;
 const PDF_VIEWER_VIEWPORT_PADDING_X = 48;
 const PDF_VIEWER_VIEWPORT_PADDING_Y = 48;
 const PDF_VIEWER_THUMBNAIL_WIDTH_PX = 78;
-const PDF_VIEWER_THUMBNAIL_OVERSCAN = 4;
+const PDF_VIEWER_THUMBNAIL_PREFETCH_MARGIN_PX = 320;
+const PDF_VIEWER_THUMBNAIL_MAX_CONCURRENT_RENDERS = 2;
+const PDF_VIEWER_THUMBNAIL_CACHE_MAX_ENTRIES = 64;
+const PDF_VIEWER_THUMBNAIL_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const PDF_VIEWER_SOFT_PAGE_FILTER = 'brightness(0.9) contrast(0.96)';
 const PDF_VIEWER_AUTO_PAGE_FILTER_CLASS = 'dark:[filter:brightness(0.9)_contrast(0.96)]';
 const PDF_SELECTION_TOOLBAR_HEIGHT_PX = 38;
@@ -243,6 +248,14 @@ interface PdfThumbnailCanvasProps {
   shouldRender: boolean;
   pageToneMode: PdfViewerPageToneMode;
   onClick: () => void;
+  onRenderStart: (pageNumber: number) => void;
+  onRenderComplete: (pageNumber: number, byteSize: number) => void;
+  onRenderCancelled: (pageNumber: number) => void;
+}
+
+interface PdfThumbnailCacheEntry {
+  byteSize: number;
+  lastUsed: number;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -1121,6 +1134,9 @@ function PdfThumbnailCanvas({
   shouldRender,
   pageToneMode,
   onClick,
+  onRenderStart,
+  onRenderComplete,
+  onRenderCancelled,
 }: PdfThumbnailCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [thumbnailSize, setThumbnailSize] = useState<PdfPageSize>({ width: PDF_VIEWER_THUMBNAIL_WIDTH_PX, height: 104 });
@@ -1139,10 +1155,28 @@ function PdfThumbnailCanvas({
       return undefined;
     }
 
-    void pdfDocument.getPage(pageNumber)
-      .then((page) => {
+    let completed = false;
+    let released = false;
+    const releaseRender = (didComplete: boolean, byteSize = 0) => {
+      if (released) {
+        return;
+      }
+
+      released = true;
+      if (didComplete) {
+        onRenderComplete(pageNumber, byteSize);
+      } else {
+        onRenderCancelled(pageNumber);
+      }
+    };
+
+    onRenderStart(pageNumber);
+
+    void (async () => {
+      try {
+        const page = await pdfDocument.getPage(pageNumber);
         if (cancelled) {
-          return undefined;
+          return;
         }
 
         const baseViewport = page.getViewport({ scale: 1, rotation });
@@ -1156,20 +1190,32 @@ function PdfThumbnailCanvas({
         canvas.style.height = `${viewport.height}px`;
         context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
         renderTask = page.render({ canvas, canvasContext: context, viewport });
-        return renderTask.promise;
-      })
-      .catch(() => undefined);
+        await renderTask.promise;
+        if (!cancelled) {
+          completed = true;
+          releaseRender(true, canvas.width * canvas.height * 4);
+        }
+      } catch {
+        if (!cancelled) {
+          releaseRender(false);
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
       renderTask?.cancel?.();
+      if (!completed) {
+        releaseRender(false);
+      }
     };
-  }, [pageNumber, pdfDocument, rotation, shouldRender]);
+  }, [onRenderCancelled, onRenderComplete, onRenderStart, pageNumber, pdfDocument, rotation, shouldRender]);
 
   return (
     <button
       type="button"
       data-testid={`pdf-viewer-thumbnail-${pageNumber}`}
+      data-pdf-thumbnail-page={pageNumber}
       aria-label={`Go to page ${pageNumber}`}
       aria-current={isActive ? 'page' : undefined}
       onClick={onClick}
@@ -1204,6 +1250,20 @@ function PdfThumbnailCanvas({
       <span>{pageNumber}</span>
     </button>
   );
+}
+
+function arePageSetsEqual(first: ReadonlySet<number>, second: ReadonlySet<number>): boolean {
+  if (first.size !== second.size) {
+    return false;
+  }
+
+  for (const pageNumber of first) {
+    if (!second.has(pageNumber)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 interface PdfInfoPopoverContentProps {
@@ -1447,6 +1507,9 @@ export function PdfViewerPane({
   const pageScrollWheelDeltaRef = useRef(0);
   const pageScrollWheelTimeStampRef = useRef(0);
   const scrollModeRestorePageRef = useRef<number | null>(null);
+  const thumbnailCacheRef = useRef<Map<number, PdfThumbnailCacheEntry>>(new Map());
+  const thumbnailCacheAccessRef = useRef(0);
+  const thumbnailProtectedPagesRef = useRef<Set<number>>(new Set());
   const handDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -1471,6 +1534,10 @@ export function PdfViewerPane({
   const [renderError, setRenderError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [selectionToolbar, setSelectionToolbar] = useState<PdfSelectionToolbarState | null>(null);
+  const [visibleThumbnailPages, setVisibleThumbnailPages] = useState<Set<number>>(() => new Set());
+  const [prefetchedThumbnailPages, setPrefetchedThumbnailPages] = useState<Set<number>>(() => new Set());
+  const [cachedThumbnailPages, setCachedThumbnailPages] = useState<Set<number>>(() => new Set());
+  const [renderingThumbnailPages, setRenderingThumbnailPages] = useState<Set<number>>(() => new Set());
   const {
     activeSearchMatchIndex,
     fitMode,
@@ -1524,10 +1591,49 @@ export function PdfViewerPane({
     start: Math.max(1, pageNumber - PDF_VIEWER_RENDER_OVERSCAN),
     end: Math.min(pageCount, pageNumber + PDF_VIEWER_RENDER_OVERSCAN),
   }), [pageCount, pageNumber]);
-  const renderedThumbnailRange = useMemo(() => ({
-    start: Math.max(1, pageNumber - PDF_VIEWER_THUMBNAIL_OVERSCAN),
-    end: Math.min(pageCount, pageNumber + PDF_VIEWER_THUMBNAIL_OVERSCAN),
-  }), [pageCount, pageNumber]);
+  const thumbnailRenderCandidates = useMemo(() => {
+    const candidates: number[] = [];
+    const seen = new Set<number>();
+    const addPage = (currentPageNumber: number) => {
+      if (currentPageNumber < 1 || currentPageNumber > pageCount || seen.has(currentPageNumber)) {
+        return;
+      }
+
+      seen.add(currentPageNumber);
+      candidates.push(currentPageNumber);
+    };
+    const sortByDistanceToActivePage = (first: number, second: number) => (
+      Math.abs(first - pageNumber) - Math.abs(second - pageNumber)
+    );
+
+    addPage(pageNumber);
+    [...visibleThumbnailPages].sort(sortByDistanceToActivePage).forEach(addPage);
+    [...prefetchedThumbnailPages].sort(sortByDistanceToActivePage).forEach(addPage);
+    return candidates;
+  }, [pageCount, pageNumber, prefetchedThumbnailPages, visibleThumbnailPages]);
+  const thumbnailRenderSlots = useMemo(() => {
+    const slots = new Set<number>();
+    const availableSlots = Math.max(0, PDF_VIEWER_THUMBNAIL_MAX_CONCURRENT_RENDERS - renderingThumbnailPages.size);
+
+    for (const currentPageNumber of thumbnailRenderCandidates) {
+      if (slots.size >= availableSlots) {
+        break;
+      }
+      if (cachedThumbnailPages.has(currentPageNumber) || renderingThumbnailPages.has(currentPageNumber)) {
+        continue;
+      }
+
+      slots.add(currentPageNumber);
+    }
+
+    return slots;
+  }, [cachedThumbnailPages, renderingThumbnailPages, thumbnailRenderCandidates]);
+  const thumbnailProtectedPages = useMemo(() => new Set([
+    ...thumbnailRenderCandidates,
+    ...thumbnailRenderSlots,
+    ...renderingThumbnailPages,
+  ]), [renderingThumbnailPages, thumbnailRenderCandidates, thumbnailRenderSlots]);
+  thumbnailProtectedPagesRef.current = thumbnailProtectedPages;
   const effectiveToolMode: PdfViewerToolMode = isPresentationModeActive ? 'hand' : toolMode;
   const normalizedSearchQuery = getNormalizedSearchQuery(searchQuery);
   const searchMatches = useMemo(() => {
@@ -1555,6 +1661,157 @@ export function PdfViewerPane({
   const hideSelectionToolbar = useCallback(() => {
     setSelectionToolbar(null);
   }, []);
+  const syncCachedThumbnailPages = useCallback(() => {
+    setCachedThumbnailPages((current) => {
+      const next = new Set(thumbnailCacheRef.current.keys());
+      return arePageSetsEqual(current, next) ? current : next;
+    });
+  }, []);
+  const trimThumbnailCache = useCallback((protectedPages: ReadonlySet<number>) => {
+    const cache = thumbnailCacheRef.current;
+    const getCacheByteSize = () => [...cache.values()].reduce((total, entry) => total + entry.byteSize, 0);
+    let cacheByteSize = getCacheByteSize();
+    let evicted = false;
+
+    while (
+      (cache.size > PDF_VIEWER_THUMBNAIL_CACHE_MAX_ENTRIES || cacheByteSize > PDF_VIEWER_THUMBNAIL_CACHE_MAX_BYTES)
+    ) {
+      const evictionCandidate = [...cache.entries()]
+        .filter(([currentPageNumber]) => !protectedPages.has(currentPageNumber))
+        .sort(([, first], [, second]) => first.lastUsed - second.lastUsed)[0];
+      if (!evictionCandidate) {
+        break;
+      }
+
+      cacheByteSize -= evictionCandidate[1].byteSize;
+      cache.delete(evictionCandidate[0]);
+      evicted = true;
+    }
+
+    if (evicted) {
+      syncCachedThumbnailPages();
+    }
+  }, [syncCachedThumbnailPages]);
+  const handleThumbnailRenderStart = useCallback((currentPageNumber: number) => {
+    setRenderingThumbnailPages((current) => {
+      if (current.has(currentPageNumber)) {
+        return current;
+      }
+
+      return new Set([...current, currentPageNumber]);
+    });
+  }, []);
+  const handleThumbnailRenderCancelled = useCallback((currentPageNumber: number) => {
+    setRenderingThumbnailPages((current) => {
+      if (!current.has(currentPageNumber)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(currentPageNumber);
+      return next;
+    });
+  }, []);
+  const handleThumbnailRenderComplete = useCallback((currentPageNumber: number, byteSize: number) => {
+    thumbnailCacheRef.current.set(currentPageNumber, {
+      byteSize,
+      lastUsed: ++thumbnailCacheAccessRef.current,
+    });
+    handleThumbnailRenderCancelled(currentPageNumber);
+    trimThumbnailCache(thumbnailProtectedPagesRef.current);
+    syncCachedThumbnailPages();
+  }, [handleThumbnailRenderCancelled, syncCachedThumbnailPages, trimThumbnailCache]);
+  useEffect(() => {
+    thumbnailCacheRef.current.clear();
+    thumbnailCacheAccessRef.current = 0;
+    setVisibleThumbnailPages(new Set());
+    setPrefetchedThumbnailPages(new Set());
+    setCachedThumbnailPages(new Set());
+    setRenderingThumbnailPages(new Set());
+  }, [fileId, pdfDocument, rotation]);
+  useEffect(() => {
+    for (const currentPageNumber of thumbnailRenderCandidates) {
+      const entry = thumbnailCacheRef.current.get(currentPageNumber);
+      if (entry) {
+        entry.lastUsed = ++thumbnailCacheAccessRef.current;
+      }
+    }
+    trimThumbnailCache(thumbnailProtectedPages);
+  }, [thumbnailProtectedPages, thumbnailRenderCandidates, trimThumbnailCache]);
+  useEffect(() => {
+    if (
+      typeof IntersectionObserver !== 'undefined'
+      || !pdfDocument
+      || pageCount === 0
+      || isPresentationModeActive
+      || !isThumbnailRailVisible
+    ) {
+      return;
+    }
+
+    const start = Math.max(1, pageNumber - PDF_VIEWER_RENDER_OVERSCAN);
+    const end = Math.min(pageCount, pageNumber + PDF_VIEWER_RENDER_OVERSCAN);
+    setVisibleThumbnailPages(new Set([pageNumber]));
+    setPrefetchedThumbnailPages(new Set(Array.from({ length: end - start + 1 }, (_, index) => start + index)));
+  }, [isPresentationModeActive, isThumbnailRailVisible, pageCount, pageNumber, pdfDocument]);
+  useEffect(() => {
+    if (!pdfDocument || pageCount === 0 || isPresentationModeActive || !isThumbnailRailVisible) {
+      setVisibleThumbnailPages(new Set());
+      setPrefetchedThumbnailPages(new Set());
+      return undefined;
+    }
+
+    const rail = thumbnailRailRef.current;
+    if (!rail) {
+      return undefined;
+    }
+
+    const thumbnailElements = Array.from(rail.querySelectorAll<HTMLElement>('[data-pdf-thumbnail-page]'));
+    const updateObservedPages = (
+      setPages: Dispatch<SetStateAction<Set<number>>>,
+      entries: IntersectionObserverEntry[],
+    ) => {
+      setPages((current) => {
+        const next = new Set(current);
+        for (const entry of entries) {
+          const currentPageNumber = Number((entry.target as HTMLElement).dataset.pdfThumbnailPage ?? 0);
+          if (currentPageNumber < 1 || currentPageNumber > pageCount) {
+            continue;
+          }
+          if (entry.isIntersecting) {
+            next.add(currentPageNumber);
+          } else {
+            next.delete(currentPageNumber);
+          }
+        }
+        return arePageSetsEqual(current, next) ? current : next;
+      });
+    };
+
+    if (typeof IntersectionObserver === 'undefined') {
+      return undefined;
+    }
+
+    setVisibleThumbnailPages(new Set());
+    setPrefetchedThumbnailPages(new Set());
+    const visibleObserver = new IntersectionObserver(
+      (entries) => updateObservedPages(setVisibleThumbnailPages, entries),
+      { root: rail, threshold: 0.01 },
+    );
+    const prefetchObserver = new IntersectionObserver(
+      (entries) => updateObservedPages(setPrefetchedThumbnailPages, entries),
+      { root: rail, rootMargin: `${PDF_VIEWER_THUMBNAIL_PREFETCH_MARGIN_PX}px 0px`, threshold: 0.01 },
+    );
+    for (const element of thumbnailElements) {
+      visibleObserver.observe(element);
+      prefetchObserver.observe(element);
+    }
+
+    return () => {
+      visibleObserver.disconnect();
+      prefetchObserver.disconnect();
+    };
+  }, [isPresentationModeActive, isThumbnailRailVisible, pageCount, pdfDocument]);
   const resetPresentationWheelState = useCallback(() => {
     presentationWheelDeltaRef.current = 0;
     presentationWheelTimeStampRef.current = 0;
@@ -3292,11 +3549,15 @@ export function PdfViewerPane({
                     rotation={rotation}
                     isActive={currentPageNumber === pageNumber}
                     shouldRender={
-                      currentPageNumber >= renderedThumbnailRange.start
-                      && currentPageNumber <= renderedThumbnailRange.end
+                      cachedThumbnailPages.has(currentPageNumber)
+                      || renderingThumbnailPages.has(currentPageNumber)
+                      || thumbnailRenderSlots.has(currentPageNumber)
                     }
                     pageToneMode={pageToneMode}
                     onClick={() => scrollToPage(currentPageNumber)}
+                    onRenderStart={handleThumbnailRenderStart}
+                    onRenderComplete={handleThumbnailRenderComplete}
+                    onRenderCancelled={handleThumbnailRenderCancelled}
                   />
                 ))}
               </div>

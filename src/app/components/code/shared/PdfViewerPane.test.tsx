@@ -149,6 +149,52 @@ const exitFullscreenMock = vi.fn(() => {
   return Promise.resolve();
 });
 
+class MockIntersectionObserver {
+  static instances: MockIntersectionObserver[] = [];
+
+  private readonly observedElements = new Set<Element>();
+
+  constructor(
+    private readonly callback: IntersectionObserverCallback,
+    readonly options: IntersectionObserverInit = {},
+  ) {
+    MockIntersectionObserver.instances.push(this);
+  }
+
+  observe = (element: Element) => {
+    this.observedElements.add(element);
+  };
+
+  unobserve = (element: Element) => {
+    this.observedElements.delete(element);
+  };
+
+  disconnect = () => {
+    this.observedElements.clear();
+  };
+
+  takeRecords = () => [] as IntersectionObserverEntry[];
+
+  emitPages(pageNumbers: number[], isIntersecting: boolean) {
+    const requestedPages = new Set(pageNumbers);
+    const entries = [...this.observedElements]
+      .filter((element) => requestedPages.has(Number((element as HTMLElement).dataset.pdfThumbnailPage ?? 0)))
+      .map((target) => ({ isIntersecting, target }) as IntersectionObserverEntry);
+    this.callback(entries, this as unknown as IntersectionObserver);
+  }
+}
+
+function installIntersectionObserverMock() {
+  MockIntersectionObserver.instances = [];
+  vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+}
+
+function emitThumbnailIntersection(pageNumbers: number[], isIntersecting = true) {
+  for (const observer of MockIntersectionObserver.instances) {
+    observer.emitPages(pageNumbers, isIntersecting);
+  }
+}
+
 describe('PdfViewerPane', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -178,6 +224,7 @@ describe('PdfViewerPane', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -210,6 +257,63 @@ describe('PdfViewerPane', () => {
     expect(await screen.findByTestId('pdf-viewer-text-layer-1')).toBeInTheDocument();
     expect(await screen.findByTestId('pdf-viewer-text-layer-2')).toBeInTheDocument();
   });
+
+  it('keeps rail-visible thumbnails rendered after the main viewport moves to a later page', async () => {
+    installIntersectionObserverMock();
+    const pdfDocument = createMockPdfDocument(12);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await waitFor(() => expect(MockIntersectionObserver.instances).toHaveLength(2));
+    emitThumbnailIntersection([1, 2]);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-2')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-last-page'));
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('12 / 12'));
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-2')).toBeInTheDocument();
+  });
+
+  it('schedules only rail candidates for a thousand-page PDF', async () => {
+    installIntersectionObserverMock();
+    const pdfDocument = createMockPdfDocument(1_000);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/large.pdf" fileName="large.pdf" />);
+
+    await waitFor(() => expect(MockIntersectionObserver.instances).toHaveLength(2));
+    emitThumbnailIntersection([500, 501, 502]);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-500')).toBeInTheDocument(), {
+      timeout: 10_000,
+    });
+    expect(screen.queryByTestId('pdf-viewer-thumbnail-canvas-999')).not.toBeInTheDocument();
+    expect(pdfDocument.getPage).not.toHaveBeenCalledWith(999);
+    expect(pdfDocument.getPage.mock.calls.length).toBeLessThan(20);
+  }, 15_000);
+
+  it('evicts only rail-external thumbnails after the cache reaches its LRU limit', async () => {
+    installIntersectionObserverMock();
+    const pdfDocument = createMockPdfDocument(65);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/cache.pdf" fileName="cache.pdf" />);
+
+    await waitFor(() => expect(MockIntersectionObserver.instances).toHaveLength(2));
+    const thumbnailPages = Array.from({ length: 65 }, (_, index) => index + 1);
+    emitThumbnailIntersection(thumbnailPages);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-65')).toBeInTheDocument(), {
+      timeout: 15_000,
+    });
+
+    emitThumbnailIntersection(Array.from({ length: 63 }, (_, index) => index + 2), false);
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-thumbnail-canvas-2')).not.toBeInTheDocument());
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-65')).toBeInTheDocument();
+  }, 20_000);
 
   it('shows PDF file information from document metadata', async () => {
     vi.mocked(window.electronAPI!.fs.readFileBinary).mockResolvedValue(new Uint8Array(828_734));

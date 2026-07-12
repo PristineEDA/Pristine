@@ -5282,6 +5282,19 @@ test('PDF thumbnail rail follows the main viewport current page', async () => {
   });
   expect(activeThumbnailIsVisible).toBe(true);
 
+  await thumbnailRail.evaluate((element) => {
+    const rail = element as unknown as {
+      dispatchEvent: (event: Event) => boolean;
+      scrollTop: number;
+    };
+    rail.scrollTop = 0;
+    rail.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  await expect(window.getByTestId('pdf-viewer-thumbnail-1')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeVisible({
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+
   await app.close();
 });
 
