@@ -149,6 +149,52 @@ const exitFullscreenMock = vi.fn(() => {
   return Promise.resolve();
 });
 
+class MockIntersectionObserver {
+  static instances: MockIntersectionObserver[] = [];
+
+  private readonly observedElements = new Set<Element>();
+
+  constructor(
+    private readonly callback: IntersectionObserverCallback,
+    readonly options: IntersectionObserverInit = {},
+  ) {
+    MockIntersectionObserver.instances.push(this);
+  }
+
+  observe = (element: Element) => {
+    this.observedElements.add(element);
+  };
+
+  unobserve = (element: Element) => {
+    this.observedElements.delete(element);
+  };
+
+  disconnect = () => {
+    this.observedElements.clear();
+  };
+
+  takeRecords = () => [] as IntersectionObserverEntry[];
+
+  emitPages(pageNumbers: number[], isIntersecting: boolean) {
+    const requestedPages = new Set(pageNumbers);
+    const entries = [...this.observedElements]
+      .filter((element) => requestedPages.has(Number((element as HTMLElement).dataset.pdfThumbnailPage ?? 0)))
+      .map((target) => ({ isIntersecting, target }) as IntersectionObserverEntry);
+    this.callback(entries, this as unknown as IntersectionObserver);
+  }
+}
+
+function installIntersectionObserverMock() {
+  MockIntersectionObserver.instances = [];
+  vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+}
+
+function emitThumbnailIntersection(pageNumbers: number[], isIntersecting = true) {
+  for (const observer of MockIntersectionObserver.instances) {
+    observer.emitPages(pageNumbers, isIntersecting);
+  }
+}
+
 describe('PdfViewerPane', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -178,6 +224,7 @@ describe('PdfViewerPane', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -210,6 +257,63 @@ describe('PdfViewerPane', () => {
     expect(await screen.findByTestId('pdf-viewer-text-layer-1')).toBeInTheDocument();
     expect(await screen.findByTestId('pdf-viewer-text-layer-2')).toBeInTheDocument();
   });
+
+  it('keeps rail-visible thumbnails rendered after the main viewport moves to a later page', async () => {
+    installIntersectionObserverMock();
+    const pdfDocument = createMockPdfDocument(12);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await waitFor(() => expect(MockIntersectionObserver.instances).toHaveLength(2));
+    emitThumbnailIntersection([1, 2]);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-2')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-last-page'));
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('12 / 12'));
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-2')).toBeInTheDocument();
+  });
+
+  it('schedules only rail candidates for a thousand-page PDF', async () => {
+    installIntersectionObserverMock();
+    const pdfDocument = createMockPdfDocument(1_000);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/large.pdf" fileName="large.pdf" />);
+
+    await waitFor(() => expect(MockIntersectionObserver.instances).toHaveLength(2));
+    emitThumbnailIntersection([500, 501, 502]);
+
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-500')).toBeInTheDocument(), {
+      timeout: 10_000,
+    });
+    expect(screen.queryByTestId('pdf-viewer-thumbnail-canvas-999')).not.toBeInTheDocument();
+    expect(pdfDocument.getPage).not.toHaveBeenCalledWith(999);
+    expect(pdfDocument.getPage.mock.calls.length).toBeLessThan(20);
+  }, 15_000);
+
+  it('evicts only rail-external thumbnails after the cache reaches its LRU limit', async () => {
+    installIntersectionObserverMock();
+    const pdfDocument = createMockPdfDocument(65);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/cache.pdf" fileName="cache.pdf" />);
+
+    await waitFor(() => expect(MockIntersectionObserver.instances).toHaveLength(2));
+    const thumbnailPages = Array.from({ length: 65 }, (_, index) => index + 1);
+    emitThumbnailIntersection(thumbnailPages);
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-65')).toBeInTheDocument(), {
+      timeout: 15_000,
+    });
+
+    emitThumbnailIntersection(Array.from({ length: 63 }, (_, index) => index + 2), false);
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-thumbnail-canvas-2')).not.toBeInTheDocument());
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-65')).toBeInTheDocument();
+  }, 20_000);
 
   it('shows PDF file information from document metadata', async () => {
     vi.mocked(window.electronAPI!.fs.readFileBinary).mockResolvedValue(new Uint8Array(828_734));
@@ -543,8 +647,8 @@ describe('PdfViewerPane', () => {
     render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
 
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-last-page')).toBeEnabled());
     expect(screen.getByTestId('pdf-viewer-first-page')).toBeDisabled();
-    expect(screen.getByTestId('pdf-viewer-last-page')).toBeEnabled();
 
     fireEvent.click(screen.getByTestId('pdf-viewer-last-page'));
 
@@ -590,6 +694,58 @@ describe('PdfViewerPane', () => {
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-zoom-indicator')).toHaveTextContent('100%'));
   });
 
+  it('switches between PDF scroll modes while keeping the current page', async () => {
+    const pdfDocument = createMockPdfDocument(3);
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    const viewport = await screen.findByTestId('pdf-viewer-scroll-viewport');
+    const pageLayout = screen.getByTestId('pdf-viewer-page-layout');
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-vertical')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-page')).toHaveTextContent('');
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-horizontal')).toHaveTextContent('');
+    expect(screen.getByTestId('pdf-viewer-scroll-mode-wrapped')).toHaveTextContent('');
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-next-page'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3'));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-horizontal'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'horizontal'));
+    expect(pageLayout).toHaveAttribute('data-scroll-mode', 'horizontal');
+    expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3');
+
+    viewport.scrollLeft = 0;
+    fireEvent.wheel(viewport, { deltaY: 72 });
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').scrollLeft).toBe(72);
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-wrapped'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'wrapped'));
+    expect(pageLayout).toHaveAttribute('data-scroll-mode', 'wrapped');
+    expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('2 / 3');
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-page'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'page'));
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-3')).not.toBeInTheDocument();
+
+    fireEvent.wheel(viewport, { deltaY: 120 });
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('3 / 3'));
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-3')).toBeInTheDocument());
+
+    fireEvent.keyDown(viewport, { key: 'Home' });
+    await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-indicator')).toHaveTextContent('1 / 3'));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-mode-vertical'));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-scroll-mode', 'vertical'));
+    expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-page-3')).toBeInTheDocument();
+  });
+
   it('enters presentation mode, navigates pages, and restores the previous viewer session on exit', async () => {
     const pdfDocument = createMockPdfDocument(3);
     mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
@@ -632,9 +788,27 @@ describe('PdfViewerPane', () => {
     await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(1));
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument());
 
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     fireEvent.wheel(viewport, {
       deltaY: 120,
     });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-viewer-page-1')).not.toBeInTheDocument();
+
+    viewport.scrollTop = 0;
+    viewport.scrollLeft = 0;
+    fireEvent.scroll(viewport);
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
+    expect(screen.getByTestId('pdf-viewer-page-2')).toBeInTheDocument();
+
+    dateNowSpy.mockReturnValue(1_600);
+    fireEvent.wheel(viewport, { deltaY: -120 });
+    await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(1));
+    expect(screen.getByTestId('pdf-viewer-page-1')).toBeInTheDocument();
+
+    dateNowSpy.mockReturnValue(2_200);
+    fireEvent.wheel(viewport, { deltaY: 120 });
     await waitFor(() => expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').pageNumber).toBe(2));
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
       isPresentationModeActive: true,

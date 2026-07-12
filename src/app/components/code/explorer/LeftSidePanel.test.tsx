@@ -648,9 +648,10 @@ describe('LeftSidePanel', () => {
     const tree = container.querySelector('.explorer-tree-scrollbar') as HTMLElement;
     tree.scrollTop = 180;
 
-    let anchorTop = 120;
+    let anchorDocumentTop = 300;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
       if (this.getAttribute('data-testid') === 'file-tree-node-rtl_peripherals_uart_aux_v') {
+        const anchorTop = anchorDocumentTop - tree.scrollTop;
         return {
           x: 0,
           y: anchorTop,
@@ -692,7 +693,7 @@ describe('LeftSidePanel', () => {
       );
     });
 
-    anchorTop = 96;
+    anchorDocumentTop = 276;
 
     rerender(
       <LeftSidePanel
@@ -702,7 +703,9 @@ describe('LeftSidePanel', () => {
       />,
     );
 
-    expect(tree.scrollTop).toBe(156);
+    await waitFor(() => {
+      expect(tree.scrollTop).toBe(156);
+    });
   });
 
   it('starts inline rename when F2 is pressed on document after selecting a file in the tree', async () => {
