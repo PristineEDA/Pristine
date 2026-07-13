@@ -21,6 +21,24 @@ interface MockPdfDocumentOptions {
   info?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   outline?: Array<Record<string, unknown>>;
+  textContent?: Record<number, {
+    items: Array<{
+      dir: string;
+      fontName: string;
+      hasEOL: boolean;
+      height: number;
+      str: string;
+      transform: number[];
+      width: number;
+    }>;
+    lang: string | null;
+    styles: Record<string, {
+      ascent: number;
+      descent: number;
+      fontFamily: string;
+      vertical: boolean;
+    }>;
+  }>;
 }
 
 function createMockPdfDocument(
@@ -61,13 +79,25 @@ function createMockPdfDocument(
     },
   }));
   const getPage = vi.fn(async (pageNumber: number) => ({
-    getTextContent: vi.fn(async () => ({
+    getTextContent: vi.fn(async () => options.textContent?.[pageNumber] ?? ({
       items: (pageTexts[pageNumber] ?? [`Page ${pageNumber} timing text`]).map((text, index) => ({
+        dir: 'ltr',
+        fontName: 'mock-font',
+        hasEOL: false,
         str: text,
         transform: [12, 0, 0, 12, 24, 760 - index * 24],
         width: text.length * 7,
         height: 12,
       })),
+      lang: 'en',
+      styles: {
+        'mock-font': {
+          ascent: 0.8,
+          descent: -0.2,
+          fontFamily: 'sans-serif',
+          vertical: false,
+        },
+      },
     })),
     getViewport,
     getAnnotations: vi.fn(async () => options.annotations?.[pageNumber] ?? []),
@@ -256,6 +286,76 @@ describe('PdfViewerPane', () => {
     expect(screen.getByTestId('pdf-viewer-page-canvas-1')).toHaveAttribute('height', '800');
     expect(await screen.findByTestId('pdf-viewer-text-layer-1')).toBeInTheDocument();
     expect(await screen.findByTestId('pdf-viewer-text-layer-2')).toBeInTheDocument();
+  });
+
+  it('preserves PDF line breaks and calibrated font geometry for multi-line selection', async () => {
+    const pdfDocument = createMockPdfDocument(1, {}, {
+      textContent: {
+        1: {
+          items: [
+            {
+              dir: 'ltr',
+              fontName: 'body-font',
+              hasEOL: false,
+              height: 12,
+              str: 'First selectable line',
+              transform: [12, 0, 0, 12, 24, 760],
+              width: 120,
+            },
+            {
+              dir: 'ltr',
+              fontName: 'body-font',
+              hasEOL: true,
+              height: 0,
+              str: '',
+              transform: [12, 0, 0, 12, 24, 736],
+              width: 0,
+            },
+            {
+              dir: 'ltr',
+              fontName: 'body-font',
+              hasEOL: false,
+              height: 12,
+              str: 'Second line split ',
+              transform: [12, 0, 0, 12, 24, 736],
+              width: 105,
+            },
+            {
+              dir: 'ltr',
+              fontName: 'body-font',
+              hasEOL: true,
+              height: 12,
+              str: 'across runs',
+              transform: [12, 0, 0, 12, 129, 736],
+              width: 66,
+            },
+          ],
+          lang: 'en',
+          styles: {
+            'body-font': {
+              ascent: 0.8,
+              descent: -0.2,
+              fontFamily: 'serif',
+              vertical: false,
+            },
+          },
+        },
+      },
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    const textLayer = await screen.findByTestId('pdf-viewer-text-layer-1');
+    expect(textLayer.querySelectorAll('br')).toHaveLength(2);
+    expect(textLayer.querySelector('[data-pdf-text-item-index="0"]')).toHaveStyle({
+      fontFamily: 'serif',
+      fontSize: '12px',
+      top: '31px',
+    });
+    expect(textLayer.querySelector('[data-pdf-text-item-index="2"]')).toHaveStyle({
+      transformOrigin: '0 0',
+    });
   });
 
   it('keeps rail-visible thumbnails rendered after the main viewport moves to a later page', async () => {

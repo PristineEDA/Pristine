@@ -793,7 +793,7 @@ function createWorkspaceCopyWithFiles(targetName: string, files: Record<string, 
   return targetPath;
 }
 
-function createE2EPdfBuffer(pageCount = 2) {
+function createE2EPdfBuffer(pageCount = 2, options: { multilinePageOne?: boolean } = {}) {
   const parts: string[] = ['%PDF-1.4\n'];
   const offsets: number[] = [];
 
@@ -821,8 +821,17 @@ function createE2EPdfBuffer(pageCount = 2) {
     const pageNumber = index + 1;
     const { contentId, pageId } = pageObjects[index];
     const annotationClause = pageNumber === 1 ? ` /Annots [${linkObjectId} 0 R]` : '';
-    const pageStream = pageNumber === 1
-      ? 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1 https://example.com/pristine-pdf) Tj ET'
+    const pageStream = pageNumber === 1 && options.multilinePageOne
+      ? [
+          'BT /F1 36 Tf',
+          '1 0 0 1 72 1260 Tm (Alpha selectable opening line) Tj',
+          '1 0 0 1 72 1200 Tm (Bravo complete middle line) Tj',
+          '1 0 0 1 72 1140 Tm (Charlie split middle ) Tj (across runs) Tj',
+          '1 0 0 1 72 1080 Tm (Delta selectable closing line) Tj',
+          'ET',
+        ].join('\n')
+      : pageNumber === 1
+        ? 'BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page 1 https://example.com/pristine-pdf) Tj ET'
       : `BT /F1 36 Tf 72 1260 Td (Pristine PDF E2E page ${pageNumber}) Tj ET`;
 
     addObject(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 1400] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentId} 0 R${annotationClause} >>`);
@@ -5207,6 +5216,174 @@ test('file tree opens PDF files in the center editor tab', async () => {
   await expect(window.getByTestId('pdf-viewer-search-highlight').first()).toBeVisible();
   await window.getByTestId('pdf-viewer-search-next').click();
   await expect(window.getByTestId('pdf-viewer-search-count')).toContainText('2 / 2');
+
+  await app.close();
+});
+
+test('PDF text selection keeps complete multi-line geometry', async () => {
+  const projectRoot = createWorkspaceCopyWithFiles('pdf-text-selection-project', {
+    'docs/multiline.pdf': createE2EPdfBuffer(1, { multilinePageOne: true }),
+  });
+  const { app, window } = await launchApp({ projectRoot });
+
+  await ensureExplorerVisible(window);
+  await openNestedWorkspaceFile(window, [
+    toWorkspaceTreeTestId('docs'),
+    toWorkspaceTreeTestId('docs/multiline.pdf'),
+  ]);
+
+  await expect(window.getByTestId('pdf-viewer-pane')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-text-layer-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+
+  const selectAcrossLines = async () => window.evaluate(() => {
+    interface BrowserRect {
+      bottom: number;
+      height: number;
+      left: number;
+      right: number;
+      top: number;
+      width: number;
+    }
+    interface BrowserTextNode {
+      textContent: string | null;
+    }
+    interface BrowserElement {
+      firstChild: BrowserTextNode | null;
+      getBoundingClientRect: () => BrowserRect;
+      querySelectorAll: (selector: string) => BrowserElement[];
+      textContent: string | null;
+    }
+    interface BrowserRange {
+      getClientRects: () => BrowserRect[];
+      selectNodeContents: (node: BrowserElement | BrowserTextNode) => void;
+      setEnd: (node: BrowserTextNode, offset: number) => void;
+      setStart: (node: BrowserTextNode, offset: number) => void;
+    }
+    interface BrowserSelection {
+      addRange: (range: BrowserRange) => void;
+      removeAllRanges: () => void;
+      toString: () => string;
+    }
+    const browserGlobal = globalThis as unknown as {
+      document: {
+        createRange: () => BrowserRange;
+        dispatchEvent: (event: Event) => void;
+        querySelector: (selector: string) => BrowserElement | null;
+      };
+      getComputedStyle: (element: BrowserElement) => { fontSize: string };
+      getSelection: () => BrowserSelection | null;
+    };
+    const layer = browserGlobal.document.querySelector('[data-testid="pdf-viewer-text-layer-1"]');
+    const spans = Array.from(layer?.querySelectorAll('[data-pdf-text-item-index]') ?? [])
+      .filter((span) => Boolean(span.firstChild?.textContent));
+    if (!layer || spans.length < 4) {
+      throw new Error(`Expected at least four PDF text runs, received ${spans.length}.`);
+    }
+
+    const firstNode = spans[0]!.firstChild;
+    const lastNode = spans[spans.length - 1]!.firstChild;
+    if (!firstNode || !lastNode) {
+      throw new Error('Expected text nodes at both ends of the PDF selection.');
+    }
+
+    const range = browserGlobal.document.createRange();
+    range.setStart(firstNode, Math.min(6, firstNode.textContent?.length ?? 0));
+    range.setEnd(lastNode, Math.max(1, (lastNode.textContent?.length ?? 1) - 6));
+    const selection = browserGlobal.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    browserGlobal.document.dispatchEvent(new Event('selectionchange'));
+
+    const rects = Array.from(range.getClientRects())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => ({
+        bottom: rect.bottom,
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        width: rect.width,
+      }));
+    const textRunRects = spans.flatMap((span) => {
+      const textRange = browserGlobal.document.createRange();
+      textRange.selectNodeContents(span.firstChild!);
+      return Array.from(textRange.getClientRects())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+    });
+    const contentRects = rects.filter((rect) => textRunRects.some((textRect) => (
+      Math.min(rect.right, textRect.right) - Math.max(rect.left, textRect.left) > 0
+      && Math.min(rect.bottom, textRect.bottom) - Math.max(rect.top, textRect.top) > 0
+    ))).sort((left, right) => left.top - right.top || left.left - right.left);
+    const mergedContentRects = contentRects.reduce<BrowserRect[]>((mergedRects, rect) => {
+      const previous = mergedRects[mergedRects.length - 1];
+      if (!previous) {
+        mergedRects.push({ ...rect });
+        return mergedRects;
+      }
+
+      const verticalOverlap = Math.min(previous.bottom, rect.bottom) - Math.max(previous.top, rect.top);
+      const minimumHeight = Math.min(previous.height, rect.height);
+      const horizontalGap = rect.left - previous.right;
+      if (verticalOverlap < minimumHeight * 0.6 || horizontalGap > Math.max(2, minimumHeight * 0.4)) {
+        mergedRects.push({ ...rect });
+        return mergedRects;
+      }
+
+      previous.left = Math.min(previous.left, rect.left);
+      previous.right = Math.max(previous.right, rect.right);
+      previous.top = Math.min(previous.top, rect.top);
+      previous.bottom = Math.max(previous.bottom, rect.bottom);
+      previous.width = previous.right - previous.left;
+      previous.height = previous.bottom - previous.top;
+      return mergedRects;
+    }, []);
+    const middleSpan = spans.find((span) => span.textContent?.includes('Bravo complete middle line'));
+    const middleBounds = middleSpan?.getBoundingClientRect();
+    const middleSelectionRect = middleBounds
+      ? mergedContentRects.find((rect) => Math.min(rect.bottom, middleBounds.bottom) - Math.max(rect.top, middleBounds.top) > 0)
+      : undefined;
+
+    return {
+      lineRectCount: mergedContentRects.length,
+      maxHeightDelta: Math.max(...mergedContentRects.map((rect) => Math.min(
+        ...textRunRects
+          .filter((textRect) => Math.min(rect.bottom, textRect.bottom) - Math.max(rect.top, textRect.top) > 0)
+          .map((textRect) => Math.abs(rect.height - textRect.height)),
+      ))),
+      middleCoverageDelta: middleBounds && middleSelectionRect
+        ? Math.abs(middleSelectionRect.left - middleBounds.left)
+          + Math.abs(middleSelectionRect.right - middleBounds.right)
+        : Number.POSITIVE_INFINITY,
+      selectedText: selection?.toString() ?? '',
+    };
+  });
+
+  const geometryAt100 = await selectAcrossLines();
+  expect(geometryAt100.selectedText).toContain('Bravo complete middle line');
+  expect(geometryAt100.selectedText).toContain('Charlie split middle across runs');
+  expect(geometryAt100.lineRectCount).toBeGreaterThanOrEqual(4);
+  expect(geometryAt100.maxHeightDelta).toBeLessThanOrEqual(1.5);
+  expect(geometryAt100.middleCoverageDelta).toBeLessThanOrEqual(2);
+
+  const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
+  await viewport.dispatchEvent('mouseup');
+  await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await window.getByTestId('pdf-viewer-selection-highlight').click();
+  await expect(window.getByTestId('pdf-viewer-highlight').first()).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await window.getByTestId('pdf-viewer-zoom-in').click();
+  await expect(window.getByTestId('pdf-viewer-zoom-indicator')).toContainText('150%', {
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByTestId('pdf-viewer-text-layer-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+
+  const geometryAt150 = await selectAcrossLines();
+  expect(geometryAt150.selectedText).toContain('Bravo complete middle line');
+  expect(geometryAt150.selectedText).toContain('Charlie split middle across runs');
+  expect(geometryAt150.lineRectCount).toBeGreaterThanOrEqual(4);
+  expect(geometryAt150.maxHeightDelta).toBeLessThanOrEqual(1.5);
+  expect(geometryAt150.middleCoverageDelta).toBeLessThanOrEqual(2);
 
   await app.close();
 });

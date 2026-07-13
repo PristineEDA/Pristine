@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -64,6 +65,11 @@ import {
   type PdfViewerToolMode,
   usePdfViewerStore,
 } from '../../../pdf/usePdfViewerStore';
+import {
+  buildPdfTextRuns,
+  type PdfTextContentLike,
+  type PdfTextRun,
+} from '../../../pdf/pdfTextLayerGeometry';
 import { isAbsoluteFilePath } from '../../../workspace/workspaceFiles';
 import {
   DropdownMenu,
@@ -114,22 +120,11 @@ interface PdfPageSize {
   height: number;
 }
 
-interface PdfTextItem {
-  itemIndex: number;
-  text: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
 interface PdfSearchMatch {
   pageNumber: number;
   itemIndex: number;
   globalIndex: number;
 }
-
-type PdfTransform = [number, number, number, number, number, number];
 
 interface PdfLinkOverlay {
   id: string;
@@ -219,7 +214,7 @@ interface PdfPageTextLayerProps {
   toolMode: PdfViewerToolMode;
   searchMatches: PdfSearchMatch[];
   activeSearchMatchIndex: number;
-  onTextItemsChange: (pageNumber: number, items: PdfTextItem[]) => void;
+  onTextItemsChange: (pageNumber: number, items: PdfTextRun[]) => void;
 }
 
 interface PdfPageLinkLayerProps {
@@ -229,7 +224,7 @@ interface PdfPageLinkLayerProps {
   rotation: PdfViewerRotation;
   shouldRender: boolean;
   pageSize: PdfPageSize;
-  textItems: PdfTextItem[];
+  textItems: PdfTextRun[];
   onOpenLink: (url: string) => void;
 }
 
@@ -551,7 +546,7 @@ function setViewportScroll(viewport: HTMLElement, scrollLeft: number, scrollTop:
   viewport.scrollTop = Math.max(0, scrollTop);
 }
 
-function getBoundsFromClientRects(rects: DOMRect[]): PdfClientRectBounds | null {
+function getBoundsFromClientRects(rects: PdfClientRectBounds[]): PdfClientRectBounds | null {
   if (rects.length === 0) {
     return null;
   }
@@ -577,6 +572,66 @@ function getBoundsFromClientRects(rects: DOMRect[]): PdfClientRectBounds | null 
   return bounds.width > 0 && bounds.height > 0 ? bounds : null;
 }
 
+function mergePdfSelectionClientRects(rects: DOMRect[]): PdfClientRectBounds[] {
+  const sortedRects = rects
+    .filter((rect) => rect.width > 0 && rect.height > 0)
+    .map<PdfClientRectBounds>((rect) => ({
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    }))
+    .sort((left, right) => left.top - right.top || left.left - right.left);
+
+  const mergedRects: PdfClientRectBounds[] = [];
+  for (const rect of sortedRects) {
+    const previous = mergedRects[mergedRects.length - 1];
+    if (!previous) {
+      mergedRects.push(rect);
+      continue;
+    }
+
+    const verticalOverlap = Math.min(previous.bottom, rect.bottom) - Math.max(previous.top, rect.top);
+    const minimumHeight = Math.min(previous.height, rect.height);
+    const horizontalGap = rect.left - previous.right;
+    const isSameVisualLine = verticalOverlap >= minimumHeight * 0.6
+      && horizontalGap <= Math.max(2, minimumHeight * 0.4);
+    if (!isSameVisualLine) {
+      mergedRects.push(rect);
+      continue;
+    }
+
+    previous.left = Math.min(previous.left, rect.left);
+    previous.right = Math.max(previous.right, rect.right);
+    previous.top = Math.min(previous.top, rect.top);
+    previous.bottom = Math.max(previous.bottom, rect.bottom);
+    previous.width = previous.right - previous.left;
+    previous.height = previous.bottom - previous.top;
+  }
+
+  return mergedRects;
+}
+
+function getSelectionContentClientRects(viewport: HTMLElement, range: Range): DOMRect[] {
+  const selectionRects = Array.from(range.getClientRects())
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+  const textRunRects = Array.from(
+    viewport.querySelectorAll<HTMLElement>('[data-pdf-text-item-index]'),
+  )
+    .map((element) => element.getBoundingClientRect())
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+  if (textRunRects.length === 0) {
+    return selectionRects;
+  }
+
+  return selectionRects.filter((selectionRect) => textRunRects.some((textRect) => (
+    Math.min(selectionRect.right, textRect.right) - Math.max(selectionRect.left, textRect.left) > 0
+    && Math.min(selectionRect.bottom, textRect.bottom) - Math.max(selectionRect.top, textRect.top) > 0
+  )));
+}
+
 function getPdfSelectionInfo(
   viewport: HTMLElement | null,
   zoom: number,
@@ -593,7 +648,7 @@ function getPdfSelectionInfo(
   }
 
   const range = selection.getRangeAt(0);
-  const clientRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+  const clientRects = mergePdfSelectionClientRects(getSelectionContentClientRects(viewport, range));
   const bounds = getBoundsFromClientRects(clientRects);
   if (!bounds) {
     return null;
@@ -644,29 +699,6 @@ function getPdfSelectionInfo(
     bounds,
     pageMatches,
   };
-}
-
-function normalizeTransform(value: unknown, fallback: PdfTransform): PdfTransform {
-  if (!Array.isArray(value) || value.length < 6) {
-    return fallback;
-  }
-
-  const nextTransform = value.slice(0, 6).map((entry) => (
-    typeof entry === 'number' && Number.isFinite(entry) ? entry : 0
-  )) as PdfTransform;
-
-  return nextTransform;
-}
-
-function multiplyTransform(first: PdfTransform, second: PdfTransform): PdfTransform {
-  return [
-    first[0] * second[0] + first[2] * second[1],
-    first[1] * second[0] + first[3] * second[1],
-    first[0] * second[2] + first[2] * second[3],
-    first[1] * second[2] + first[3] * second[3],
-    first[0] * second[4] + first[2] * second[5] + first[4],
-    first[1] * second[4] + first[3] * second[5] + first[5],
-  ];
 }
 
 function getNormalizedSearchQuery(query: string): string {
@@ -861,7 +893,7 @@ function PdfPageTextLayer({
   activeSearchMatchIndex,
   onTextItemsChange,
 }: PdfPageTextLayerProps) {
-  const [textItems, setTextItems] = useState<PdfTextItem[]>([]);
+  const [textItems, setTextItems] = useState<PdfTextRun[]>([]);
   const matchByItemIndex = useMemo(() => {
     const nextMatches = new Map<number, PdfSearchMatch>();
     for (const match of searchMatches) {
@@ -887,29 +919,7 @@ function PdfPageTextLayer({
 
         const viewport = page.getViewport({ scale: zoom, rotation });
         const textContent = await page.getTextContent();
-        const viewportTransform = normalizeTransform(
-          viewport.transform,
-          [zoom, 0, 0, -zoom, 0, viewport.height],
-        );
-
-        return (textContent.items as Array<{ str?: string; transform?: number[]; width?: number; height?: number }>)
-          .map((item, itemIndex) => {
-            const text = item.str ?? '';
-            const itemTransform = normalizeTransform(item.transform, [1, 0, 0, 1, 0, 0]);
-            const transform = multiplyTransform(viewportTransform, itemTransform);
-            const height = Math.max(1, Math.hypot(transform[2], transform[3]) || (item.height ?? 10) * zoom);
-            const width = Math.max(1, (item.width ?? text.length * 7) * zoom);
-
-            return {
-              itemIndex,
-              text,
-              left: transform[4],
-              top: transform[5] - height,
-              width,
-              height,
-            };
-          })
-          .filter((item) => item.text.length > 0);
+        return buildPdfTextRuns(textContent as PdfTextContentLike, viewport);
       })
       .then((items) => {
         if (!cancelled) {
@@ -941,34 +951,64 @@ function PdfPageTextLayer({
         'absolute inset-0 z-[2] overflow-hidden',
         toolMode === 'hand' ? 'pointer-events-none select-none' : 'select-text',
       ].join(' ')}
-      style={{ height: pageSize.height, width: pageSize.width }}
+      style={{
+        height: pageSize.height,
+        width: pageSize.width,
+        lineHeight: '1',
+        letterSpacing: 'normal',
+        textAlign: 'initial',
+        textSizeAdjust: 'none',
+        WebkitTextSizeAdjust: 'none',
+        forcedColorAdjust: 'none',
+        wordSpacing: 'normal',
+      }}
     >
       {textItems.map((item) => {
         const match = matchByItemIndex.get(item.itemIndex);
         const isActiveMatch = match?.globalIndex === activeSearchMatchIndex;
         return (
-          <span
-            key={`${pageNumber}-${item.itemIndex}`}
-            data-testid={match ? 'pdf-viewer-search-highlight' : undefined}
-            data-pdf-search-match-index={match?.globalIndex}
-            className={[
-              'absolute whitespace-pre text-transparent selection:bg-sky-400/35',
-              match ? 'rounded-sm bg-amber-300/35' : '',
-              isActiveMatch ? 'outline outline-1 outline-amber-200 bg-amber-300/60' : '',
-            ].join(' ')}
-            style={{
-              left: item.left,
-              top: item.top,
-              width: item.width,
-              height: item.height,
-              fontSize: item.height,
-              lineHeight: '1',
-            }}
-          >
-            {item.text}
-          </span>
+          <Fragment key={`${pageNumber}-${item.itemIndex}`}>
+            {item.text ? (
+              <span
+                role="presentation"
+                dir={item.dir}
+                lang={item.lang ?? undefined}
+                data-testid={match ? 'pdf-viewer-search-highlight' : undefined}
+                data-pdf-search-match-index={match?.globalIndex}
+                data-pdf-text-item-index={item.itemIndex}
+                className={[
+                  'absolute cursor-text whitespace-pre text-transparent selection:bg-sky-400/35',
+                  match ? 'rounded-sm bg-amber-300/35' : '',
+                  isActiveMatch ? 'outline outline-1 outline-amber-200 bg-amber-300/60' : '',
+                ].join(' ')}
+                style={{
+                  fontFamily: item.fontFamily,
+                  fontSize: item.fontHeight,
+                  left: item.left,
+                  lineHeight: '1',
+                  top: item.top,
+                  transform: `rotate(${item.angle}deg) scaleX(${item.scaleX})`,
+                  transformOrigin: '0 0',
+                }}
+              >
+                {item.text}
+              </span>
+            ) : null}
+            {item.hasEOL ? (
+              <br
+                role="presentation"
+                data-pdf-text-eol={item.itemIndex}
+                className="absolute select-text selection:bg-transparent"
+              />
+            ) : null}
+          </Fragment>
         );
       })}
+      <div
+        aria-hidden="true"
+        data-pdf-text-end-of-content="true"
+        className="pointer-events-none absolute inset-x-0 top-full h-0 select-none"
+      />
     </div>
   );
 }
@@ -1085,10 +1125,10 @@ function PdfPageLinkLayer({
       return {
         id: `text-${pageNumber}-${item.itemIndex}`,
         url,
-        left: item.left,
-        top: item.top,
-        width: item.width,
-        height: item.height,
+        left: item.bounds.left,
+        top: item.bounds.top,
+        width: item.bounds.width,
+        height: item.bounds.height,
       };
     })
     .filter((link): link is PdfLinkOverlay => link !== null);
@@ -1524,7 +1564,7 @@ export function PdfViewerPane({
   const [isPdfDocumentInfoLoading, setIsPdfDocumentInfoLoading] = useState(false);
   const [pageCount, setPageCount] = useState(0);
   const [pageSizes, setPageSizes] = useState<Record<number, PdfPageSize>>({});
-  const [pageTextItems, setPageTextItems] = useState<Record<number, PdfTextItem[]>>({});
+  const [pageTextItems, setPageTextItems] = useState<Record<number, PdfTextRun[]>>({});
   const [bookmarks, setBookmarks] = useState<PdfBookmark[]>([]);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [isHandDragging, setIsHandDragging] = useState(false);
@@ -2133,7 +2173,7 @@ export function PdfViewerPane({
     });
   }, []);
 
-  const handleTextItemsChange = useCallback((nextPageNumber: number, items: PdfTextItem[]) => {
+  const handleTextItemsChange = useCallback((nextPageNumber: number, items: PdfTextRun[]) => {
     setPageTextItems((current) => {
       if (current[nextPageNumber] === items) {
         return current;
