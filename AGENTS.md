@@ -6,7 +6,7 @@ This file contains execution rules for agents working in this repository. Keep i
 
 Pristine is currently an Electron, Vite, React, and TypeScript workspace.
 
-- Main app: Electron 33, Vite 8, React 19, TypeScript, Tailwind CSS v4, Monaco Editor, Radix/shadcn-style primitives, lucide-react, assistant-ui, and Zustand.
+- Main app: Electron 35, Vite 8, React 19, TypeScript, Tailwind CSS v4, Monaco Editor, Radix/shadcn-style primitives, lucide-react, assistant-ui, and Zustand.
 - Agent server: the Mastra server lives in sibling `../pristine-agent` and is consumed through the local HTTP API. Do not reintroduce `agent-server/` as a Pristine workspace package.
 - Tests: Vitest for unit tests and Playwright for end-to-end and performance tests.
 - Native/core roadmap work is documented separately. Do not assume a C++ source tree exists unless the repository contains one.
@@ -52,6 +52,28 @@ Pristine is currently an Electron, Vite, React, and TypeScript workspace.
 - When adding or changing LSP methods, update the shared TypeScript LSP types, Electron IPC handlers, preload wiring, renderer bridge, debug request/response logging, normalization fallbacks, and targeted tests together.
 - LSP request handlers must fail safely on timeout or engine errors. Interactive requests should use short timeouts; hierarchy and outline requests should keep their longer 30 second timeout unless there is a measured reason to change it.
 - The LSP debug panel should be able to show initialization and request history even when a feature panel triggers engine startup before Monaco opens a document.
+
+## Desktop Workflow Rules
+
+- Keep main-window visibility coordinated with renderer workspace bootstrap. Do not reintroduce an `EmptyProject` flash while a previous project session is restoring.
+- Native notifications are main-process owned. Preserve the validated `window.electronAPI.notifications` boundary, the renderer history contract, unread/read semantics, and tray badge/tooltip updates together.
+- Bottom panel layouts and focused panes are project-session UI state. Preserve tab-scoped split behavior and do not persist transient WSL terminal overrides or terminal buffers.
+- The RTL Regression panel currently presents mock data and mock interactions only. Do not describe or wire it as a real simulation/regression runner until a backend contract exists.
+
+## PDF Viewer Rules
+
+- Keep the PDF viewer on its self-managed `pdfjs-dist` rendering path. Do not import PDF.js official viewer components or copy code from its `web/` implementation.
+- Keep PDF.js documents, pages, render tasks, canvas caches, observers, and text/link caches local to the viewer lifecycle. Zustand stores only per-file UI session state such as page, zoom, rails, search state, and local annotation data.
+- PDF files must continue to use the existing constrained binary file-read APIs. They must not enter Monaco text loading, LSP, dirty-state, or save flows.
+- Local PDF highlights and comments are renderer-session data only. Do not write them back to PDF files or project SQLite unless a dedicated persistence contract is introduced.
+- PDF changes require focused unit coverage and Playwright coverage for file-tree opening, viewer interaction, and any affected rendering, scrolling, thumbnail, search, link, or annotation workflow. Large-document changes must keep visible thumbnail rendering bounded and cancellable.
+
+## WSL Development Environment Rules
+
+- The managed Pristine EDA environment is Windows-only. Keep WSL commands in Electron IPC and retain the restricted `wsl-pristine-eda` terminal profile; never expose arbitrary shell command arguments through the renderer API.
+- Starting WSL may temporarily replace the focused PowerShell pane. Preserve the original session and restore it after pause, shell exit, close cleanup, or a start/stop failure.
+- Before renderer-approved app exit, best-effort deactivate the managed distro, restore any overridden terminal pane, then persist the project session. Main-process shutdown fallback must not block application exit.
+- WSL failures must return the UI to an actionable state and publish an error through the existing native notification path.
 
 ## Waveform and PixiJS Rules
 
