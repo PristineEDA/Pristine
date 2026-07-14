@@ -18,6 +18,7 @@ import {
 import {
   AlertTriangle,
   BookOpen,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronsDown,
@@ -41,7 +42,9 @@ import {
   RotateCw,
   ScanText,
   Search,
+  Send,
   TextCursorInput,
+  Trash2,
   WrapText,
   Type,
   X,
@@ -56,6 +59,7 @@ import {
   PDF_VIEWER_MIN_ZOOM,
   PDF_VIEWER_ZOOM_STEP,
   type PdfHighlightAnnotation,
+  type PdfHighlightColor,
   type PdfHighlightRect,
   type PdfViewerFitMode,
   type PdfViewerPageToneMode,
@@ -77,7 +81,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '../../ui/popover';
+import { Textarea } from '../../ui/textarea';
 import { TooltipIconButton } from '../../ui/tooltip-icon-button';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -106,6 +111,19 @@ const PDF_VIEWER_PAGE_TONE_OPTIONS: Array<{ value: PdfViewerPageToneMode; label:
   { value: 'auto', label: 'Auto' },
   { value: 'original', label: 'Original' },
   { value: 'soft', label: 'Soft page' },
+];
+
+const PDF_HIGHLIGHT_COLOR_OPTIONS: Array<{
+  value: PdfHighlightColor;
+  label: string;
+  swatch: string;
+  background: string;
+}> = [
+  { value: 'yellow', label: 'Yellow', swatch: '#fde047', background: 'rgba(250, 204, 21, 0.38)' },
+  { value: 'green', label: 'Green', swatch: '#34d399', background: 'rgba(52, 211, 153, 0.38)' },
+  { value: 'cyan', label: 'Cyan', swatch: '#67e8f9', background: 'rgba(103, 232, 249, 0.38)' },
+  { value: 'pink', label: 'Pink', swatch: '#f9a8d4', background: 'rgba(249, 168, 212, 0.38)' },
+  { value: 'red', label: 'Red', swatch: '#fb7185', background: 'rgba(251, 113, 133, 0.38)' },
 ];
 
 interface PdfViewerPaneProps {
@@ -233,6 +251,17 @@ interface PdfPageHighlightLayerProps {
   pageSize: PdfPageSize;
   zoom: number;
   annotations: PdfHighlightAnnotation[];
+  selectedHighlightId: string | null;
+}
+
+interface PdfHighlightInteractionOverlayProps {
+  annotation: PdfHighlightAnnotation;
+  mode: 'controls' | 'comments';
+  zoom: number;
+  onClose: () => void;
+  onColorChange: (color: PdfHighlightColor) => void;
+  onDelete: () => void;
+  onSubmitComment: (body: string) => boolean;
 }
 
 interface PdfThumbnailCanvasProps {
@@ -1018,6 +1047,7 @@ function PdfPageHighlightLayer({
   pageSize,
   zoom,
   annotations,
+  selectedHighlightId,
 }: PdfPageHighlightLayerProps) {
   const pageAnnotations = annotations.filter((annotation) => annotation.pageNumber === pageNumber);
   if (pageAnnotations.length === 0) {
@@ -1034,9 +1064,15 @@ function PdfPageHighlightLayer({
         <div
           key={`${annotation.id}-${rectIndex}`}
           data-testid="pdf-viewer-highlight"
-          className="absolute rounded-[1px] bg-yellow-300/35 mix-blend-multiply outline outline-1 outline-yellow-200/30"
+          data-pdf-highlight-id={annotation.id}
+          data-pdf-highlight-color={annotation.color}
+          className="absolute rounded-[1px] mix-blend-multiply"
           title={annotation.quote}
           style={{
+            backgroundColor: PDF_HIGHLIGHT_COLOR_OPTIONS.find((option) => option.value === annotation.color)?.background,
+            boxShadow: selectedHighlightId === annotation.id
+              ? '0 0 0 2px rgba(14, 165, 233, 0.95)'
+              : 'inset 0 0 0 1px rgba(255, 255, 255, 0.08)',
             left: rect.left * zoom,
             top: rect.top * zoom,
             width: rect.width * zoom,
@@ -1289,6 +1325,292 @@ function PdfThumbnailCanvas({
       )}
       <span>{pageNumber}</span>
     </button>
+  );
+}
+
+function getHighlightPixelBounds(annotation: PdfHighlightAnnotation, zoom: number): PdfClientRectBounds | null {
+  if (annotation.rects.length === 0) {
+    return null;
+  }
+
+  const left = Math.min(...annotation.rects.map((rect) => rect.left * zoom));
+  const top = Math.min(...annotation.rects.map((rect) => rect.top * zoom));
+  const right = Math.max(...annotation.rects.map((rect) => (rect.left + rect.width) * zoom));
+  const bottom = Math.max(...annotation.rects.map((rect) => (rect.top + rect.height) * zoom));
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function getHighlightAtViewportPoint(
+  viewport: HTMLElement,
+  annotations: PdfHighlightAnnotation[],
+  zoom: number,
+  clientX: number,
+  clientY: number,
+): PdfHighlightAnnotation | null {
+  const hitPadding = Math.max(1, 2 / zoom);
+  for (let index = annotations.length - 1; index >= 0; index -= 1) {
+    const annotation = annotations[index];
+    if (!annotation) {
+      continue;
+    }
+
+    const pageElement = viewport.querySelector<HTMLElement>(
+      `[data-pdf-page-content="true"][data-pdf-page-number="${annotation.pageNumber}"]`,
+    );
+    if (!pageElement) {
+      continue;
+    }
+
+    const pageBounds = pageElement.getBoundingClientRect();
+    const pageX = (clientX - pageBounds.left) / zoom;
+    const pageY = (clientY - pageBounds.top) / zoom;
+    const isHit = annotation.rects.some((rect) => (
+      pageX >= rect.left - hitPadding
+      && pageX <= rect.left + rect.width + hitPadding
+      && pageY >= rect.top - hitPadding
+      && pageY <= rect.top + rect.height + hitPadding
+    ));
+    if (isHit) {
+      return annotation;
+    }
+  }
+
+  return null;
+}
+
+function formatHighlightCommentTime(createdAt: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(createdAt);
+}
+
+function PdfHighlightInteractionOverlay({
+  annotation,
+  mode,
+  zoom,
+  onClose,
+  onColorChange,
+  onDelete,
+  onSubmitComment,
+}: PdfHighlightInteractionOverlayProps) {
+  const [isColorMenuOpen, setIsColorMenuOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+  const bounds = getHighlightPixelBounds(annotation, zoom);
+  const colorOption = PDF_HIGHLIGHT_COLOR_OPTIONS.find((option) => option.value === annotation.color)
+    ?? PDF_HIGHLIGHT_COLOR_OPTIONS[0];
+  if (!bounds || !colorOption) {
+    return null;
+  }
+
+  const handleSubmitComment = () => {
+    if (onSubmitComment(commentDraft)) {
+      setCommentDraft('');
+    }
+  };
+
+  return (
+    <Popover open onOpenChange={(open) => {
+      if (!open) {
+        onClose();
+      }
+    }}>
+      <PopoverAnchor asChild>
+        <span
+          aria-hidden="true"
+          data-pdf-highlight-anchor={annotation.id}
+          className="pointer-events-none absolute z-10"
+          style={{
+            left: bounds.left,
+            top: bounds.top,
+            width: bounds.width,
+            height: bounds.height,
+          }}
+        />
+      </PopoverAnchor>
+      {mode === 'controls' ? (
+        <PopoverContent
+          align="center"
+          side="bottom"
+          sideOffset={8}
+          data-testid="pdf-viewer-highlight-controls"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onInteractOutside={(event) => {
+            const target = event.target;
+            if (target instanceof Element && target.closest('[data-testid="pdf-viewer-highlight-color-menu"]')) {
+              event.preventDefault();
+            }
+          }}
+          className="w-auto border-ide-border bg-ide-tab-bg p-1 text-ide-text shadow-xl"
+        >
+          <div className="flex items-center gap-1">
+            <Popover open={isColorMenuOpen} onOpenChange={setIsColorMenuOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Change highlight color"
+                  aria-expanded={isColorMenuOpen}
+                  className="flex h-8 items-center gap-1 rounded px-1.5 text-ide-text transition-colors hover:bg-ide-hover"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="h-5 w-5 rounded-full ring-1 ring-white/25"
+                    style={{ backgroundColor: colorOption.swatch }}
+                  />
+                  <ChevronDown size={13} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                side="bottom"
+                sideOffset={6}
+                data-testid="pdf-viewer-highlight-color-menu"
+                className="w-auto border-ide-border bg-ide-tab-bg p-1.5 shadow-xl"
+              >
+                <div className="flex flex-col gap-1">
+                  {PDF_HIGHLIGHT_COLOR_OPTIONS.map((option) => (
+                    <TooltipIconButton key={option.value} content={option.label} side="right">
+                      <button
+                        type="button"
+                        aria-label={`${option.label} highlight`}
+                        aria-pressed={annotation.color === option.value}
+                        data-testid={`pdf-viewer-highlight-color-${option.value}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onColorChange(option.value);
+                          setIsColorMenuOpen(false);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded transition-colors hover:bg-ide-hover"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="h-5 w-5 rounded-full ring-1 ring-white/25"
+                          style={{
+                            backgroundColor: option.swatch,
+                            boxShadow: annotation.color === option.value ? '0 0 0 2px var(--ide-accent)' : undefined,
+                          }}
+                        />
+                      </button>
+                    </TooltipIconButton>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <div className="h-5 w-px bg-ide-border" />
+            <TooltipIconButton content="Delete highlight" side="bottom">
+              <button
+                type="button"
+                aria-label="Delete highlight"
+                data-testid="pdf-viewer-highlight-delete"
+                onPointerDown={(event) => {
+                  if (event.button !== 0) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDelete();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (event.detail === 0) {
+                    onDelete();
+                  }
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded text-ide-text-muted transition-colors hover:bg-ide-hover hover:text-ide-error"
+              >
+                <Trash2 size={16} />
+              </button>
+            </TooltipIconButton>
+          </div>
+        </PopoverContent>
+      ) : (
+        <PopoverContent
+          align="start"
+          side="right"
+          sideOffset={10}
+          data-testid="pdf-viewer-highlight-comment-overlay"
+          className="w-80 border-ide-border bg-ide-tab-bg p-0 text-ide-text shadow-xl"
+        >
+          <div className="flex h-10 items-center justify-between border-b border-ide-border px-3">
+            <div className="flex items-center gap-2 text-[12px] font-medium">
+              <MessageSquarePlus size={14} className="text-ide-text-muted" />
+              Comments
+            </div>
+            <button
+              type="button"
+              aria-label="Close comments"
+              onClick={onClose}
+              className="flex h-7 w-7 items-center justify-center rounded text-ide-text-muted hover:bg-ide-hover hover:text-ide-text"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="max-h-52 overflow-y-auto px-3">
+            {annotation.comments.length === 0 ? (
+              <div className="py-5 text-center text-[11px] text-ide-text-muted">No comments yet.</div>
+            ) : annotation.comments.map((comment) => (
+              <div key={comment.id} className="border-b border-ide-border/70 py-3 last:border-b-0">
+                <div className="mb-1 flex items-center gap-2 text-[11px]">
+                  <span className="font-medium text-ide-text">{comment.author}</span>
+                  <span className="text-ide-text-muted">{formatHighlightCommentTime(comment.createdAt)}</span>
+                </div>
+                <p className="whitespace-pre-wrap break-words text-[12px] leading-5 text-ide-text">{comment.body}</p>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-end gap-2 border-t border-ide-border p-3">
+            <Textarea
+              autoFocus
+              rows={2}
+              maxLength={2_000}
+              value={commentDraft}
+              data-testid="pdf-viewer-highlight-comment-input"
+              placeholder="Add a reply"
+              onChange={(event) => setCommentDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  handleSubmitComment();
+                }
+              }}
+              className="min-h-14 resize-none bg-ide-editor-bg px-2.5 py-2 text-[12px]"
+            />
+            <TooltipIconButton content="Add comment" side="top">
+              <button
+                type="button"
+                aria-label="Add comment"
+                data-testid="pdf-viewer-highlight-comment-submit"
+                disabled={!commentDraft.trim()}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleSubmitComment();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (event.detail === 0) {
+                    handleSubmitComment();
+                  }
+                }}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-ide-accent text-white transition-colors hover:brightness-110 disabled:cursor-default disabled:opacity-40"
+              >
+                <Send size={14} />
+              </button>
+            </TooltipIconButton>
+          </div>
+        </PopoverContent>
+      )}
+    </Popover>
   );
 }
 
@@ -1580,6 +1902,7 @@ export function PdfViewerPane({
   const [renderingThumbnailPages, setRenderingThumbnailPages] = useState<Set<number>>(() => new Set());
   const {
     activeSearchMatchIndex,
+    commentHighlightId,
     fitMode,
     expandedBookmarkIds,
     highlightAnnotations,
@@ -1592,6 +1915,7 @@ export function PdfViewerPane({
     pageToneMode,
     rotation,
     searchQuery,
+    selectedHighlightId,
     scrollMode,
     toolMode,
     zoom,
@@ -1604,6 +1928,12 @@ export function PdfViewerPane({
   const setThumbnailRailVisible = usePdfViewerStore((state) => state.setThumbnailRailVisible);
   const toggleBookmarkExpanded = usePdfViewerStore((state) => state.toggleBookmarkExpanded);
   const addHighlightAnnotation = usePdfViewerStore((state) => state.addHighlightAnnotation);
+  const addHighlightComment = usePdfViewerStore((state) => state.addHighlightComment);
+  const closeHighlightInteraction = usePdfViewerStore((state) => state.closeHighlightInteraction);
+  const removeHighlightAnnotation = usePdfViewerStore((state) => state.removeHighlightAnnotation);
+  const setCommentHighlight = usePdfViewerStore((state) => state.setCommentHighlight);
+  const setHighlightAnnotationColor = usePdfViewerStore((state) => state.setHighlightAnnotationColor);
+  const setSelectedHighlight = usePdfViewerStore((state) => state.setSelectedHighlight);
   const setPageNumber = usePdfViewerStore((state) => state.setPageNumber);
   const setPageNumberFromViewport = usePdfViewerStore((state) => state.setPageNumberFromViewport);
   const rotate = usePdfViewerStore((state) => state.rotate);
@@ -2792,6 +3122,13 @@ export function PdfViewerPane({
   }, [handlePresentationKeyCommand, isPresentationModeActive]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape' && (selectedHighlightId || commentHighlightId)) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeHighlightInteraction(fileId);
+      return;
+    }
+
     if (isPresentationModeActive) {
       if (handlePresentationKeyCommand(event)) {
         event.stopPropagation();
@@ -2825,6 +3162,8 @@ export function PdfViewerPane({
   }, [
     canGoNext,
     canGoPrevious,
+    closeHighlightInteraction,
+    commentHighlightId,
     fileId,
     handlePresentationKeyCommand,
     isPresentationModeActive,
@@ -2832,11 +3171,31 @@ export function PdfViewerPane({
     pageNumber,
     scrollMode,
     scrollToPage,
+    selectedHighlightId,
     setSearchOpen,
   ]);
 
-  const handlePresentationViewportClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+  const handleViewportClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (!isPresentationModeActive) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('[data-pdf-link="true"], button, input, textarea, [role="button"]')) {
+        return;
+      }
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) {
+        return;
+      }
+
+      const viewport = viewportRef.current;
+      const annotation = viewport && toolMode === 'select'
+        ? getHighlightAtViewportPoint(viewport, highlightAnnotations, zoom, event.clientX, event.clientY)
+        : null;
+      if (annotation) {
+        event.stopPropagation();
+        setSelectedHighlight(fileId, annotation.id);
+      } else {
+        closeHighlightInteraction(fileId);
+      }
       return;
     }
 
@@ -2856,7 +3215,62 @@ export function PdfViewerPane({
     if (canGoNext) {
       scrollToPage(pageNumber + 1);
     }
-  }, [canGoNext, canGoPrevious, isPresentationModeActive, pageNumber, scrollToPage]);
+  }, [
+    canGoNext,
+    canGoPrevious,
+    closeHighlightInteraction,
+    fileId,
+    highlightAnnotations,
+    isPresentationModeActive,
+    pageNumber,
+    scrollToPage,
+    setSelectedHighlight,
+    toolMode,
+    zoom,
+  ]);
+
+  const handleViewportDoubleClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (isPresentationModeActive || toolMode !== 'select') {
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-pdf-link="true"], button, input, textarea, [role="button"]')) {
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    const annotation = viewport
+      ? getHighlightAtViewportPoint(viewport, highlightAnnotations, zoom, event.clientX, event.clientY)
+      : null;
+    if (!annotation) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    window.getSelection()?.removeAllRanges();
+    hideSelectionToolbar();
+    setCommentHighlight(fileId, annotation.id);
+  }, [
+    fileId,
+    hideSelectionToolbar,
+    highlightAnnotations,
+    isPresentationModeActive,
+    setCommentHighlight,
+    toolMode,
+    zoom,
+  ]);
+
+  useEffect(() => {
+    if (toolMode === 'hand' || isPresentationModeActive) {
+      closeHighlightInteraction(fileId);
+    }
+  }, [closeHighlightInteraction, fileId, isPresentationModeActive, toolMode]);
+
+  useEffect(() => () => {
+    closeHighlightInteraction(fileId);
+  }, [closeHighlightInteraction, fileId]);
 
   const handleFirstPage = () => scrollToPage(1);
   const handlePreviousPage = () => scrollToPage(pageNumber - 1);
@@ -3459,7 +3873,8 @@ export function PdfViewerPane({
             tabIndex={0}
             onKeyDown={handleKeyDown}
             onKeyUp={scheduleSelectionToolbarUpdate}
-            onClick={handlePresentationViewportClick}
+            onClick={handleViewportClick}
+            onDoubleClick={handleViewportDoubleClick}
             onMouseDown={handleViewportMouseDown}
             onMouseUp={handleViewportMouseUp}
             onPointerDown={handlePointerDown}
@@ -3544,6 +3959,7 @@ export function PdfViewerPane({
                           pageSize={pageSize}
                           zoom={zoom}
                           annotations={highlightAnnotations}
+                          selectedHighlightId={selectedHighlightId}
                         />
                         <PdfPageTextLayer
                           pageNumber={currentPageNumber}
@@ -3567,6 +3983,23 @@ export function PdfViewerPane({
                           textItems={pageTextItems[currentPageNumber] ?? []}
                           onOpenLink={handleOpenExternalLink}
                         />
+                        {highlightAnnotations
+                          .filter((annotation) => (
+                            annotation.pageNumber === currentPageNumber
+                            && (annotation.id === selectedHighlightId || annotation.id === commentHighlightId)
+                          ))
+                          .map((annotation) => (
+                            <PdfHighlightInteractionOverlay
+                              key={annotation.id}
+                              annotation={annotation}
+                              mode={annotation.id === commentHighlightId ? 'comments' : 'controls'}
+                              zoom={zoom}
+                              onClose={() => closeHighlightInteraction(fileId)}
+                              onColorChange={(color) => setHighlightAnnotationColor(fileId, annotation.id, color)}
+                              onDelete={() => removeHighlightAnnotation(fileId, annotation.id)}
+                              onSubmitComment={(body) => addHighlightComment(fileId, annotation.id, body) !== null}
+                            />
+                          ))}
                       </div>
                     </div>
                   );

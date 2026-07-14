@@ -11,6 +11,7 @@ export type PdfViewerToolMode = 'select' | 'hand';
 export type PdfViewerPageToneMode = 'auto' | 'original' | 'soft';
 export type PdfViewerRotation = 0 | 90 | 180 | 270;
 export type PdfViewerScrollMode = 'page' | 'vertical' | 'horizontal' | 'wrapped';
+export type PdfHighlightColor = 'yellow' | 'green' | 'cyan' | 'pink' | 'red';
 
 export interface PdfHighlightRect {
   left: number;
@@ -23,8 +24,16 @@ export interface PdfHighlightAnnotation {
   id: string;
   pageNumber: number;
   rects: PdfHighlightRect[];
-  color: 'yellow';
+  color: PdfHighlightColor;
+  comments: PdfHighlightComment[];
   quote: string;
+  createdAt: number;
+}
+
+export interface PdfHighlightComment {
+  id: string;
+  body: string;
+  author: 'You';
   createdAt: number;
 }
 
@@ -62,6 +71,9 @@ export interface PdfViewerSession {
   isBookmarkTreeVisible: boolean;
   isThumbnailRailVisible: boolean;
   expandedBookmarkIds: string[];
+  defaultHighlightColor: PdfHighlightColor;
+  selectedHighlightId: string | null;
+  commentHighlightId: string | null;
   highlightAnnotations: PdfHighlightAnnotation[];
 }
 
@@ -92,6 +104,11 @@ interface PdfViewerStoreState {
   setThumbnailRailVisible: (fileId: string, visible: boolean) => void;
   toggleBookmarkExpanded: (fileId: string, bookmarkId: string) => void;
   addHighlightAnnotation: (fileId: string, annotation: CreatePdfHighlightAnnotationInput) => string | null;
+  setSelectedHighlight: (fileId: string, annotationId: string | null) => void;
+  setCommentHighlight: (fileId: string, annotationId: string | null) => void;
+  closeHighlightInteraction: (fileId: string) => void;
+  setHighlightAnnotationColor: (fileId: string, annotationId: string, color: PdfHighlightColor) => void;
+  addHighlightComment: (fileId: string, annotationId: string, body: string) => string | null;
   removeHighlightAnnotation: (fileId: string, annotationId: string) => void;
   clearHighlightAnnotations: (fileId: string) => void;
   resetPdfSession: (fileId: string) => void;
@@ -187,6 +204,14 @@ function createHighlightId(): string {
   return `pdf-highlight-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function createHighlightCommentId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `pdf-highlight-comment-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   pageNumber: PDF_VIEWER_DEFAULT_PAGE_NUMBER,
   zoom: PDF_VIEWER_DEFAULT_ZOOM,
@@ -206,6 +231,9 @@ const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   isBookmarkTreeVisible: true,
   isThumbnailRailVisible: true,
   expandedBookmarkIds: [],
+  defaultHighlightColor: 'yellow',
+  selectedHighlightId: null,
+  commentHighlightId: null,
   highlightAnnotations: [],
 };
 
@@ -680,11 +708,152 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
                 id,
                 pageNumber: normalizePageNumber(annotation.pageNumber),
                 rects,
-                color: 'yellow',
+                color: current.defaultHighlightColor,
+                comments: [],
                 quote: (annotation.quote ?? '').slice(0, 512),
                 createdAt: Date.now(),
               },
             ],
+          },
+        },
+      };
+    });
+
+    return id;
+  },
+  setSelectedHighlight: (fileId, annotationId) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const selectedHighlightId = annotationId
+        && current.highlightAnnotations.some((annotation) => annotation.id === annotationId)
+        ? annotationId
+        : null;
+      if (current.selectedHighlightId === selectedHighlightId && current.commentHighlightId === null) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            selectedHighlightId,
+            commentHighlightId: null,
+          },
+        },
+      };
+    });
+  },
+  setCommentHighlight: (fileId, annotationId) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const commentHighlightId = annotationId
+        && current.highlightAnnotations.some((annotation) => annotation.id === annotationId)
+        ? annotationId
+        : null;
+      if (current.commentHighlightId === commentHighlightId && current.selectedHighlightId === null) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            selectedHighlightId: null,
+            commentHighlightId,
+          },
+        },
+      };
+    });
+  },
+  closeHighlightInteraction: (fileId) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      if (current.selectedHighlightId === null && current.commentHighlightId === null) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            selectedHighlightId: null,
+            commentHighlightId: null,
+          },
+        },
+      };
+    });
+  },
+  setHighlightAnnotationColor: (fileId, annotationId, color) => {
+    if (!fileId || !annotationId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const annotationIndex = current.highlightAnnotations.findIndex((annotation) => annotation.id === annotationId);
+      if (annotationIndex < 0) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            defaultHighlightColor: color,
+            highlightAnnotations: current.highlightAnnotations.map((annotation) => (
+              annotation.id === annotationId ? { ...annotation, color } : annotation
+            )),
+          },
+        },
+      };
+    });
+  },
+  addHighlightComment: (fileId, annotationId, body) => {
+    const normalizedBody = body.trim().slice(0, 2_000);
+    if (!fileId || !annotationId || !normalizedBody) {
+      return null;
+    }
+
+    const current = get().sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+    if (!current.highlightAnnotations.some((annotation) => annotation.id === annotationId)) {
+      return null;
+    }
+
+    const id = createHighlightCommentId();
+    set((state) => {
+      const nextCurrent = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...nextCurrent,
+            highlightAnnotations: nextCurrent.highlightAnnotations.map((annotation) => (
+              annotation.id === annotationId
+                ? {
+                    ...annotation,
+                    comments: [
+                      ...annotation.comments,
+                      { id, body: normalizedBody, author: 'You', createdAt: Date.now() },
+                    ],
+                  }
+                : annotation
+            )),
           },
         },
       };
@@ -709,6 +878,8 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           ...state.sessions,
           [fileId]: {
             ...current,
+            selectedHighlightId: current.selectedHighlightId === annotationId ? null : current.selectedHighlightId,
+            commentHighlightId: current.commentHighlightId === annotationId ? null : current.commentHighlightId,
             highlightAnnotations: nextAnnotations,
           },
         },
@@ -731,6 +902,8 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           ...state.sessions,
           [fileId]: {
             ...current,
+            selectedHighlightId: null,
+            commentHighlightId: null,
             highlightAnnotations: [],
           },
         },

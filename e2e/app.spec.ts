@@ -5388,6 +5388,127 @@ test('PDF text selection keeps complete multi-line geometry', async () => {
   await app.close();
 });
 
+test('PDF highlight supports colors, deletion, and local comments', async () => {
+  const projectRoot = createWorkspaceCopyWithFiles('pdf-highlight-project', {
+    'docs/highlights.pdf': createE2EPdfBuffer(2, { multilinePageOne: true }),
+  });
+  const { app, window } = await launchApp({ projectRoot });
+
+  await ensureExplorerVisible(window);
+  await openNestedWorkspaceFile(window, [
+    toWorkspaceTreeTestId('docs'),
+    toWorkspaceTreeTestId('docs/highlights.pdf'),
+  ]);
+
+  await expect(window.getByTestId('pdf-viewer-pane')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  await expect(window.getByTestId('pdf-viewer-text-layer-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
+
+  const createHighlightFromTextRun = async (runIndex: number) => {
+    await window.evaluate((index) => {
+      const browserGlobal = globalThis as unknown as {
+        document: {
+          createRange: () => { selectNodeContents: (node: unknown) => void };
+          dispatchEvent: (event: Event) => void;
+          querySelectorAll: (selector: string) => ArrayLike<{ firstChild: unknown }>;
+        };
+        getSelection: () => {
+          addRange: (range: unknown) => void;
+          removeAllRanges: () => void;
+        } | null;
+      };
+      const spans = Array.from(browserGlobal.document.querySelectorAll(
+        '[data-testid="pdf-viewer-text-layer-1"] span',
+      ));
+      const span = spans[index];
+      if (!span?.firstChild) {
+        throw new Error(`Expected PDF text run ${index} for highlight selection.`);
+      }
+      const range = browserGlobal.document.createRange();
+      range.selectNodeContents(span.firstChild);
+      const selection = browserGlobal.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      browserGlobal.document.dispatchEvent(new Event('selectionchange'));
+    }, runIndex);
+    await viewport.dispatchEvent('mouseup');
+    await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toBeVisible({
+      timeout: UI_READY_TIMEOUT_MS,
+    });
+    await window.getByTestId('pdf-viewer-selection-highlight').click();
+  };
+
+  await createHighlightFromTextRun(0);
+  await expect(window.getByTestId('pdf-viewer-highlight')).toHaveCount(1);
+  const firstHighlight = window.getByTestId('pdf-viewer-highlight').first();
+  await expect(firstHighlight).toHaveAttribute('data-pdf-highlight-color', 'yellow');
+  const firstHighlightBox = await firstHighlight.boundingBox();
+  if (!firstHighlightBox) {
+    throw new Error('Expected first PDF highlight bounds.');
+  }
+  await window.mouse.click(
+    firstHighlightBox.x + firstHighlightBox.width / 2,
+    firstHighlightBox.y + firstHighlightBox.height / 2,
+  );
+  await expect(window.getByTestId('pdf-viewer-highlight-controls')).toBeVisible({
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(firstHighlight).toHaveCSS('box-shadow', /rgba?\(14, 165, 233/);
+
+  await window.getByLabel('Change highlight color').click();
+  await expect(window.getByTestId('pdf-viewer-highlight-color-menu')).toBeVisible();
+  await window.getByTestId('pdf-viewer-highlight-color-green').click();
+  await expect(firstHighlight).toHaveAttribute('data-pdf-highlight-color', 'green');
+  await expect(window.getByTestId('pdf-viewer-highlight-controls')).toBeVisible();
+  await window.getByTestId('pdf-viewer-highlight-delete').click();
+  await expect(window.getByTestId('pdf-viewer-highlight-controls')).toHaveCount(0);
+  await expect(window.getByTestId('pdf-viewer-highlight')).toHaveCount(0);
+
+  await createHighlightFromTextRun(1);
+  const greenHighlight = window.getByTestId('pdf-viewer-highlight').first();
+  await expect(greenHighlight).toHaveAttribute('data-pdf-highlight-color', 'green');
+  const greenHighlightBox = await greenHighlight.boundingBox();
+  if (!greenHighlightBox) {
+    throw new Error('Expected green PDF highlight bounds.');
+  }
+  await window.mouse.dblclick(
+    greenHighlightBox.x + greenHighlightBox.width / 2,
+    greenHighlightBox.y + greenHighlightBox.height / 2,
+  );
+  await expect(window.getByTestId('pdf-viewer-highlight-comment-overlay')).toBeVisible({
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.getByTestId('pdf-viewer-highlight-comment-input').fill('Keep this regression note');
+  await window.getByTestId('pdf-viewer-highlight-comment-submit').click();
+  await expect(window.getByText('Keep this regression note')).toBeVisible();
+  await expect(window.getByTestId('pdf-viewer-highlight-comment-overlay').getByText('You')).toBeVisible();
+
+  await window.getByTestId(toWorkspaceTreeTestId('README.md')).click();
+  await waitForMonacoEditor(window);
+  const pdfTreeNode = window.getByTestId(toWorkspaceTreeTestId('docs/highlights.pdf'));
+  if (!await pdfTreeNode.isVisible()) {
+    await window.getByTestId(toWorkspaceTreeTestId('docs')).click();
+  }
+  await pdfTreeNode.click();
+  await expect(window.getByTestId('pdf-viewer-pane')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
+  const restoredHighlight = window.getByTestId('pdf-viewer-highlight').first();
+  await expect(restoredHighlight).toHaveAttribute('data-pdf-highlight-color', 'green');
+  const restoredHighlightBox = await restoredHighlight.boundingBox();
+  if (!restoredHighlightBox) {
+    throw new Error('Expected restored PDF highlight bounds.');
+  }
+  await window.mouse.dblclick(
+    restoredHighlightBox.x + restoredHighlightBox.width / 2,
+    restoredHighlightBox.y + restoredHighlightBox.height / 2,
+  );
+  await expect(window.getByTestId('pdf-viewer-highlight-comment-overlay')).toBeVisible({
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await expect(window.getByText('Keep this regression note')).toBeVisible();
+
+  await app.close();
+});
+
 test('PDF thumbnail rail follows the main viewport current page', async () => {
   const projectRoot = createWorkspaceCopyWithFiles('pdf-thumbnail-sync-project', {
     'docs/long-spec.pdf': createE2EPdfBuffer(12),

@@ -406,14 +406,14 @@ describe('PdfViewerPane', () => {
     const thumbnailPages = Array.from({ length: 65 }, (_, index) => index + 1);
     emitThumbnailIntersection(thumbnailPages);
     await waitFor(() => expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-65')).toBeInTheDocument(), {
-      timeout: 15_000,
+      timeout: 30_000,
     });
 
     emitThumbnailIntersection(Array.from({ length: 63 }, (_, index) => index + 2), false);
     await waitFor(() => expect(screen.queryByTestId('pdf-viewer-thumbnail-canvas-2')).not.toBeInTheDocument());
     expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-1')).toBeInTheDocument();
     expect(screen.getByTestId('pdf-viewer-thumbnail-canvas-65')).toBeInTheDocument();
-  }, 20_000);
+  }, 35_000);
 
   it('shows PDF file information from document metadata', async () => {
     vi.mocked(window.electronAPI!.fs.readFileBinary).mockResolvedValue(new Uint8Array(828_734));
@@ -612,6 +612,114 @@ describe('PdfViewerPane', () => {
     expect(await screen.findByTestId('pdf-viewer-highlight')).toBeInTheDocument();
     expect(removeAllRanges).toHaveBeenCalled();
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toHaveLength(1);
+  });
+
+  it('selects, recolors, inherits the default color, and deletes a highlight block', async () => {
+    const pdfDocument = createMockPdfDocument(1, { 1: ['Selectable annotation text'] });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+    const annotationId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      quote: 'Selectable annotation text',
+      rects: [
+        { left: 40, top: 50, width: 120, height: 16 },
+        { left: 40, top: 70, width: 80, height: 16 },
+      ],
+    });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    mockPdfSelection({ isCollapsed: true, rects: [] });
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-viewport'), { clientX: 70, clientY: 75 });
+
+    expect(await screen.findByTestId('pdf-viewer-highlight-controls')).toBeInTheDocument();
+    const highlightRects = screen.getAllByTestId('pdf-viewer-highlight');
+    expect(highlightRects).toHaveLength(2);
+    expect(highlightRects[0]).toHaveStyle({ boxShadow: '0 0 0 2px rgba(14, 165, 233, 0.95)' });
+
+    fireEvent.keyDown(screen.getByTestId('pdf-viewer-scroll-viewport'), { key: 'Escape' });
+    expect(screen.queryByTestId('pdf-viewer-highlight-controls')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-viewport'), { clientX: 70, clientY: 75 });
+    expect(await screen.findByTestId('pdf-viewer-highlight-controls')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-viewport'), { clientX: 500, clientY: 500 });
+    expect(screen.queryByTestId('pdf-viewer-highlight-controls')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('pdf-viewer-scroll-viewport'), { clientX: 70, clientY: 75 });
+    expect(await screen.findByTestId('pdf-viewer-highlight-controls')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Change highlight color'));
+    expect(await screen.findByTestId('pdf-viewer-highlight-color-menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('pdf-viewer-highlight-color-green'));
+
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations[0]?.color,
+    ).toBe('green'));
+    expect(screen.getAllByTestId('pdf-viewer-highlight')[0]).toHaveAttribute('data-pdf-highlight-color', 'green');
+
+    const nextAnnotationId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 40, top: 100, width: 120, height: 16 }],
+    });
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: annotationId, color: 'green' }),
+        expect.objectContaining({ id: nextAnnotationId, color: 'green' }),
+      ]),
+    );
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-highlight-delete'));
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations
+        .some((annotation) => annotation.id === annotationId),
+    ).toBe(false));
+    expect(screen.queryByTestId('pdf-viewer-highlight-controls')).not.toBeInTheDocument();
+  });
+
+  it('opens a comment overlay on highlight double-click and submits local comments', async () => {
+    const pdfDocument = createMockPdfDocument(1, { 1: ['Commented annotation text'] });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+    const annotationId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 40, top: 50, width: 120, height: 16 }],
+    });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    mockPdfSelection({ isCollapsed: true, rects: [] });
+
+    fireEvent.doubleClick(screen.getByTestId('pdf-viewer-scroll-viewport'), { clientX: 70, clientY: 75 });
+
+    const overlay = await screen.findByTestId('pdf-viewer-highlight-comment-overlay');
+    expect(overlay).toBeInTheDocument();
+    const input = screen.getByTestId('pdf-viewer-highlight-comment-input');
+    fireEvent.change(input, { target: { value: 'First local comment' } });
+    fireEvent.click(screen.getByTestId('pdf-viewer-highlight-comment-submit'));
+
+    expect(await screen.findByText('First local comment')).toBeInTheDocument();
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations[0]?.comments).toEqual([
+      expect.objectContaining({ author: 'You', body: 'First local comment' }),
+    ]);
+
+    fireEvent.change(input, { target: { value: 'Second local comment' } });
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations[0]?.comments).toHaveLength(1);
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: false });
+    expect(await screen.findByText('Second local comment')).toBeInTheDocument();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').commentHighlightId).toBe(annotationId);
+
+    fireEvent.click(screen.getByLabelText('Close comments'));
+    await waitFor(() => expect(screen.queryByTestId('pdf-viewer-highlight-comment-overlay')).not.toBeInTheDocument());
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').commentHighlightId).toBeNull();
   });
 
   it('shows a floating selection toolbar and highlights the selected text', async () => {

@@ -26,6 +26,9 @@ const defaultSession = {
   isBookmarkTreeVisible: true,
   isThumbnailRailVisible: true,
   expandedBookmarkIds: [],
+  defaultHighlightColor: 'yellow',
+  selectedHighlightId: null,
+  commentHighlightId: null,
   highlightAnnotations: [],
 } as const;
 
@@ -267,6 +270,7 @@ describe('usePdfViewerStore', () => {
         id,
         pageNumber: 2,
         color: 'yellow',
+        comments: [],
         quote: 'Selected PDF text',
         createdAt: expect.any(Number),
         rects: [{ left: 10.12, top: 20.46, width: 120.5, height: 14.25 }],
@@ -282,6 +286,72 @@ describe('usePdfViewerStore', () => {
     });
     usePdfViewerStore.getState().clearHighlightAnnotations('docs/spec.pdf');
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual([]);
+  });
+
+  it('updates a highlight color and uses it as the next highlight default for that PDF', () => {
+    const firstId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 1, top: 2, width: 30, height: 8 }],
+    });
+
+    usePdfViewerStore.getState().setHighlightAnnotationColor('docs/spec.pdf', firstId!, 'green');
+    const secondId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 2, top: 12, width: 30, height: 8 }],
+    });
+    const otherId = usePdfViewerStore.getState().addHighlightAnnotation('docs/other.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 2, top: 12, width: 30, height: 8 }],
+    });
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
+      defaultHighlightColor: 'green',
+      highlightAnnotations: [
+        { id: firstId, color: 'green' },
+        { id: secondId, color: 'green' },
+      ],
+    });
+    expect(usePdfViewerStore.getState().getSession('docs/other.pdf')).toMatchObject({
+      defaultHighlightColor: 'yellow',
+      highlightAnnotations: [{ id: otherId, color: 'yellow' }],
+    });
+  });
+
+  it('tracks highlight interaction and local comments, and cleans it when the highlight is removed', () => {
+    const id = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 1, top: 2, width: 30, height: 8 }],
+    });
+
+    usePdfViewerStore.getState().setSelectedHighlight('docs/spec.pdf', id);
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
+      selectedHighlightId: id,
+      commentHighlightId: null,
+    });
+
+    usePdfViewerStore.getState().setCommentHighlight('docs/spec.pdf', id);
+    const commentId = usePdfViewerStore.getState().addHighlightComment('docs/spec.pdf', id!, '  First note  ');
+    expect(commentId).toEqual(expect.any(String));
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
+      selectedHighlightId: null,
+      commentHighlightId: id,
+      highlightAnnotations: [{
+        id,
+        comments: [{
+          id: commentId,
+          author: 'You',
+          body: 'First note',
+          createdAt: expect.any(Number),
+        }],
+      }],
+    });
+
+    usePdfViewerStore.getState().removeHighlightAnnotation('docs/spec.pdf', id!);
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toMatchObject({
+      selectedHighlightId: null,
+      commentHighlightId: null,
+      highlightAnnotations: [],
+    });
   });
 
   it('can reset a single file session and the full store', () => {
