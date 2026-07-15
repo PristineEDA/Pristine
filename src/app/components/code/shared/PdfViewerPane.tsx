@@ -43,10 +43,10 @@ import {
   ScanText,
   Search,
   Send,
-  TextCursorInput,
+  Strikethrough,
   Trash2,
+  Underline,
   WrapText,
-  Type,
   X,
   ZoomIn,
   ZoomOut,
@@ -60,6 +60,7 @@ import {
   PDF_VIEWER_ZOOM_STEP,
   type PdfHighlightAnnotation,
   type PdfHighlightColor,
+  type PdfHighlightKind,
   type PdfHighlightRect,
   type PdfViewerFitMode,
   type PdfViewerPageToneMode,
@@ -1060,26 +1061,78 @@ function PdfPageHighlightLayer({
       className="pointer-events-none absolute inset-0 z-[1] overflow-hidden"
       style={{ height: pageSize.height, width: pageSize.width }}
     >
-      {pageAnnotations.flatMap((annotation) => annotation.rects.map((rect, rectIndex) => (
-        <div
-          key={`${annotation.id}-${rectIndex}`}
-          data-testid="pdf-viewer-highlight"
-          data-pdf-highlight-id={annotation.id}
-          data-pdf-highlight-color={annotation.color}
-          className="absolute rounded-[1px] mix-blend-multiply"
-          title={annotation.quote}
-          style={{
-            backgroundColor: PDF_HIGHLIGHT_COLOR_OPTIONS.find((option) => option.value === annotation.color)?.background,
-            boxShadow: selectedHighlightId === annotation.id
-              ? '0 0 0 2px rgba(14, 165, 233, 0.95)'
-              : 'inset 0 0 0 1px rgba(255, 255, 255, 0.08)',
-            left: rect.left * zoom,
-            top: rect.top * zoom,
-            width: rect.width * zoom,
-            height: rect.height * zoom,
-          }}
-        />
-      )))}
+      {pageAnnotations.flatMap((annotation) => annotation.rects.map((rect, rectIndex) => {
+        const colorOption = PDF_HIGHLIGHT_COLOR_OPTIONS.find((option) => option.value === annotation.color);
+        const isSelected = selectedHighlightId === annotation.id;
+        const left = rect.left * zoom;
+        const top = rect.top * zoom;
+        const width = rect.width * zoom;
+        const height = rect.height * zoom;
+        const lineThickness = Math.max(1, Math.round(1.6 * zoom * 100) / 100);
+        const testId = annotation.kind === 'highlight'
+          ? 'pdf-viewer-highlight'
+          : `pdf-viewer-${annotation.kind}`;
+        const annotationAttributes = {
+          'data-testid': testId,
+          'data-pdf-highlight-id': annotation.id,
+          'data-pdf-highlight-kind': annotation.kind,
+          'data-pdf-highlight-color': annotation.color,
+          title: annotation.quote,
+        };
+
+        if (annotation.kind === 'highlight') {
+          return (
+            <div
+              key={`${annotation.id}-${rectIndex}`}
+              {...annotationAttributes}
+              className="absolute rounded-[1px] mix-blend-multiply"
+              style={{
+                backgroundColor: colorOption?.background,
+                boxShadow: isSelected
+                  ? '0 0 0 2px rgba(14, 165, 233, 0.95)'
+                  : 'inset 0 0 0 1px rgba(255, 255, 255, 0.08)',
+                left,
+                top,
+                width,
+                height,
+              }}
+            />
+          );
+        }
+
+        const lineTop = annotation.kind === 'underline'
+          ? top + height - lineThickness
+          : top + (height - lineThickness) / 2;
+        return (
+          <Fragment key={`${annotation.id}-${rectIndex}`}>
+            <div
+              {...annotationAttributes}
+              className="absolute rounded-full"
+              style={{
+                backgroundColor: colorOption?.swatch,
+                left,
+                top: lineTop,
+                width,
+                height: lineThickness,
+              }}
+            />
+            {isSelected ? (
+              <div
+                aria-hidden="true"
+                data-testid="pdf-viewer-highlight-selection-outline"
+                className="pointer-events-none absolute rounded-[1px]"
+                style={{
+                  boxShadow: '0 0 0 2px rgba(14, 165, 233, 0.95)',
+                  left,
+                  top,
+                  width,
+                  height,
+                }}
+              />
+            ) : null}
+          </Fragment>
+        );
+      }))}
     </div>
   );
 }
@@ -1791,10 +1844,18 @@ function PdfBookmarkTree({
 interface PdfSelectionToolbarProps {
   state: PdfSelectionToolbarState;
   onHighlight: () => void;
+  onUnderline: () => void;
+  onStrikethrough: () => void;
   toolbarRef: RefObject<HTMLDivElement | null>;
 }
 
-function PdfSelectionToolbar({ state, onHighlight, toolbarRef }: PdfSelectionToolbarProps) {
+function PdfSelectionToolbar({
+  state,
+  onHighlight,
+  onUnderline,
+  onStrikethrough,
+  toolbarRef,
+}: PdfSelectionToolbarProps) {
   const disabledButtonClassName = 'rounded p-1.5 text-ide-text-muted opacity-70';
   const enabledButtonClassName = 'rounded p-1.5 text-ide-text transition-colors hover:bg-ide-hover hover:text-ide-text';
 
@@ -1829,12 +1890,28 @@ function PdfSelectionToolbar({ state, onHighlight, toolbarRef }: PdfSelectionToo
           <Highlighter size={17} />
         </button>
       </TooltipIconButton>
-      <button type="button" aria-label="text" title="text" disabled className={disabledButtonClassName}>
-        <Type size={17} />
-      </button>
-      <button type="button" aria-label="underline" title="underline" disabled className={disabledButtonClassName}>
-        <TextCursorInput size={17} />
-      </button>
+      <TooltipIconButton content="underline" side="bottom">
+        <button
+          type="button"
+          aria-label="Underline selection"
+          data-testid="pdf-viewer-selection-underline"
+          onClick={onUnderline}
+          className={enabledButtonClassName}
+        >
+          <Underline size={17} />
+        </button>
+      </TooltipIconButton>
+      <TooltipIconButton content="strikethrough" side="bottom">
+        <button
+          type="button"
+          aria-label="Strikethrough selection"
+          data-testid="pdf-viewer-selection-strikethrough"
+          onClick={onStrikethrough}
+          className={enabledButtonClassName}
+        >
+          <Strikethrough size={17} />
+        </button>
+      </TooltipIconButton>
       <button type="button" aria-label="comment" title="comment" disabled className={disabledButtonClassName}>
         <MessageSquarePlus size={17} />
       </button>
@@ -2190,7 +2267,10 @@ export function PdfViewerPane({
     pageScrollWheelDeltaRef.current = 0;
     pageScrollWheelTimeStampRef.current = 0;
   }, []);
-  const addHighlightFromCurrentSelection = useCallback((options: { requireSinglePage?: boolean } = {}) => {
+  const addHighlightFromCurrentSelection = useCallback((
+    kind: PdfHighlightKind = 'highlight',
+    options: { requireSinglePage?: boolean } = {},
+  ) => {
     const selectionInfo = getPdfSelectionInfo(viewportRef.current, zoom, options);
     if (!selectionInfo) {
       return false;
@@ -2200,6 +2280,7 @@ export function PdfViewerPane({
       addHighlightAnnotation(fileId, {
         pageNumber: pageMatch.pageNumber,
         rects: pageMatch.rects,
+        kind,
         quote: selectionInfo.quote,
       });
     }
@@ -3357,10 +3438,16 @@ export function PdfViewerPane({
     setActiveSearchMatchIndex(fileId, (activeSearchMatchIndex + 1) % searchMatches.length, searchMatches.length);
   };
   const handleAddHighlight = () => {
-    addHighlightFromCurrentSelection();
+    addHighlightFromCurrentSelection('highlight');
   };
   const handleSelectionToolbarHighlight = () => {
-    addHighlightFromCurrentSelection({ requireSinglePage: true });
+    addHighlightFromCurrentSelection('highlight', { requireSinglePage: true });
+  };
+  const handleSelectionToolbarUnderline = () => {
+    addHighlightFromCurrentSelection('underline', { requireSinglePage: true });
+  };
+  const handleSelectionToolbarStrikethrough = () => {
+    addHighlightFromCurrentSelection('strikethrough', { requireSinglePage: true });
   };
 
   return (
@@ -4042,6 +4129,8 @@ export function PdfViewerPane({
         <PdfSelectionToolbar
           state={selectionToolbar}
           onHighlight={handleSelectionToolbarHighlight}
+          onUnderline={handleSelectionToolbarUnderline}
+          onStrikethrough={handleSelectionToolbarStrikethrough}
           toolbarRef={selectionToolbarRef}
         />
       )}

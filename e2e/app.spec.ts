@@ -5404,7 +5404,7 @@ test('PDF highlight supports colors, deletion, and local comments', async () => 
   await expect(window.getByTestId('pdf-viewer-text-layer-1')).toBeVisible({ timeout: UI_READY_TIMEOUT_MS });
   const viewport = window.getByTestId('pdf-viewer-scroll-viewport');
 
-  const createHighlightFromTextRun = async (runIndex: number) => {
+  const createAnnotationFromTextRun = async (runIndex: number, actionTestId: string) => {
     await window.evaluate((index) => {
       const browserGlobal = globalThis as unknown as {
         document: {
@@ -5435,8 +5435,11 @@ test('PDF highlight supports colors, deletion, and local comments', async () => 
     await expect(window.getByTestId('pdf-viewer-selection-toolbar')).toBeVisible({
       timeout: UI_READY_TIMEOUT_MS,
     });
-    await window.getByTestId('pdf-viewer-selection-highlight').click();
+    await window.getByTestId(actionTestId).click();
   };
+  const createHighlightFromTextRun = (runIndex: number) => (
+    createAnnotationFromTextRun(runIndex, 'pdf-viewer-selection-highlight')
+  );
 
   await createHighlightFromTextRun(0);
   await expect(window.getByTestId('pdf-viewer-highlight')).toHaveCount(1);
@@ -5463,6 +5466,51 @@ test('PDF highlight supports colors, deletion, and local comments', async () => 
   await window.getByTestId('pdf-viewer-highlight-delete').click();
   await expect(window.getByTestId('pdf-viewer-highlight-controls')).toHaveCount(0);
   await expect(window.getByTestId('pdf-viewer-highlight')).toHaveCount(0);
+
+  await createAnnotationFromTextRun(2, 'pdf-viewer-selection-underline');
+  const underline = window.getByTestId('pdf-viewer-underline').first();
+  await expect(underline).toHaveAttribute('data-pdf-highlight-kind', 'underline');
+  await expect(underline).toHaveAttribute('data-pdf-highlight-color', 'green');
+  const underlineBox = await underline.boundingBox();
+  if (!underlineBox) {
+    throw new Error('Expected PDF underline bounds.');
+  }
+  await window.mouse.click(
+    underlineBox.x + underlineBox.width / 2,
+    underlineBox.y + underlineBox.height / 2,
+  );
+  await expect(window.getByTestId('pdf-viewer-highlight-controls')).toBeVisible({
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.mouse.dblclick(
+    underlineBox.x + underlineBox.width / 2,
+    underlineBox.y + underlineBox.height / 2,
+  );
+  await expect(window.getByTestId('pdf-viewer-highlight-comment-overlay')).toBeVisible({
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.getByTestId('pdf-viewer-highlight-comment-input').fill('Keep this underline note');
+  await window.getByTestId('pdf-viewer-highlight-comment-submit').click();
+  await expect(window.getByText('Keep this underline note')).toBeVisible();
+  await window.getByLabel('Close comments').click();
+
+  await createAnnotationFromTextRun(3, 'pdf-viewer-selection-strikethrough');
+  const strikethrough = window.getByTestId('pdf-viewer-strikethrough').first();
+  await expect(strikethrough).toHaveAttribute('data-pdf-highlight-kind', 'strikethrough');
+  await expect(strikethrough).toHaveAttribute('data-pdf-highlight-color', 'green');
+  const strikethroughBox = await strikethrough.boundingBox();
+  if (!strikethroughBox) {
+    throw new Error('Expected PDF strikethrough bounds.');
+  }
+  await window.mouse.click(
+    strikethroughBox.x + strikethroughBox.width / 2,
+    strikethroughBox.y + strikethroughBox.height / 2,
+  );
+  await expect(window.getByTestId('pdf-viewer-highlight-controls')).toBeVisible({
+    timeout: UI_READY_TIMEOUT_MS,
+  });
+  await window.getByTestId('pdf-viewer-highlight-delete').click();
+  await expect(window.getByTestId('pdf-viewer-strikethrough')).toHaveCount(0);
 
   await createHighlightFromTextRun(1);
   const greenHighlight = window.getByTestId('pdf-viewer-highlight').first();

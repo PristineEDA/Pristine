@@ -679,6 +679,74 @@ describe('PdfViewerPane', () => {
     expect(screen.queryByTestId('pdf-viewer-highlight-controls')).not.toBeInTheDocument();
   });
 
+  it('selects underline and strikethrough blocks and reuses color, deletion, and comments', async () => {
+    const pdfDocument = createMockPdfDocument(1, { 1: ['Selectable annotation text'] });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+    const underlineId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'underline',
+      quote: 'Underlined text',
+      rects: [{ left: 40, top: 50, width: 120, height: 16 }],
+    });
+    const strikethroughId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'strikethrough',
+      quote: 'Struck text',
+      rects: [{ left: 40, top: 90, width: 120, height: 16 }],
+    });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    mockPdfSelection({ isCollapsed: true, rects: [] });
+    const viewport = screen.getByTestId('pdf-viewer-scroll-viewport');
+
+    const underline = await screen.findByTestId('pdf-viewer-underline');
+    const strikethrough = screen.getByTestId('pdf-viewer-strikethrough');
+    expect(underline).toHaveAttribute('data-pdf-highlight-kind', 'underline');
+    expect(underline).toHaveStyle({ top: '64.4px', height: '1.6px' });
+    expect(strikethrough).toHaveAttribute('data-pdf-highlight-kind', 'strikethrough');
+    expect(strikethrough).toHaveStyle({ top: '97.2px', height: '1.6px' });
+
+    fireEvent.click(viewport, { clientX: 70, clientY: 75 });
+    expect(await screen.findByTestId('pdf-viewer-highlight-controls')).toBeInTheDocument();
+    expect(screen.getByTestId('pdf-viewer-highlight-selection-outline')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Change highlight color'));
+    fireEvent.click(await screen.findByTestId('pdf-viewer-highlight-color-green'));
+    expect(underline).toHaveAttribute('data-pdf-highlight-color', 'green');
+
+    const inheritedId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'underline',
+      rects: [{ left: 40, top: 120, width: 120, height: 16 }],
+    });
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: inheritedId, kind: 'underline', color: 'green' }),
+    ]));
+
+    fireEvent.click(screen.getByTestId('pdf-viewer-highlight-delete'));
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations
+        .some((annotation) => annotation.id === underlineId),
+    ).toBe(false));
+
+    fireEvent.doubleClick(viewport, { clientX: 70, clientY: 115 });
+    const overlay = await screen.findByTestId('pdf-viewer-highlight-comment-overlay');
+    expect(overlay).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('pdf-viewer-highlight-comment-input'), {
+      target: { value: 'Review this strike' },
+    });
+    fireEvent.click(screen.getByTestId('pdf-viewer-highlight-comment-submit'));
+    expect(await screen.findByText('Review this strike')).toBeInTheDocument();
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: strikethroughId, comments: [expect.objectContaining({ body: 'Review this strike' })] }),
+    ]));
+  });
+
   it('opens a comment overlay on highlight double-click and submits local comments', async () => {
     const pdfDocument = createMockPdfDocument(1, { 1: ['Commented annotation text'] });
     mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
@@ -762,6 +830,43 @@ describe('PdfViewerPane', () => {
     expect(removeAllRanges).toHaveBeenCalled();
     expect(screen.queryByTestId('pdf-viewer-selection-toolbar')).not.toBeInTheDocument();
     expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toHaveLength(1);
+  });
+
+  it('creates underline and strikethrough annotations from the floating selection toolbar', async () => {
+    const pdfDocument = createMockPdfDocument(1, {
+      1: ['Selectable annotation text'],
+    });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    vi.spyOn(screen.getByTestId('pdf-viewer-pane'), 'getBoundingClientRect').mockReturnValue(createRect(0, 0, 800, 600));
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    const viewport = screen.getByTestId('pdf-viewer-scroll-viewport');
+
+    mockPdfSelection({ rects: [createRect(50, 50, 160, 16)] });
+    fireEvent.mouseUp(viewport);
+    fireEvent.click(await screen.findByTestId('pdf-viewer-selection-underline'));
+
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations,
+    ).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'underline' }),
+    ])));
+
+    mockPdfSelection({ rects: [createRect(60, 90, 160, 16)] });
+    fireEvent.mouseUp(viewport);
+    fireEvent.click(await screen.findByTestId('pdf-viewer-selection-strikethrough'));
+
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations,
+    ).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'strikethrough' }),
+    ])));
   });
 
   it('shows the selection toolbar after keyboard selection updates', async () => {

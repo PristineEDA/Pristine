@@ -269,6 +269,7 @@ describe('usePdfViewerStore', () => {
       {
         id,
         pageNumber: 2,
+        kind: 'highlight',
         color: 'yellow',
         comments: [],
         quote: 'Selected PDF text',
@@ -315,6 +316,37 @@ describe('usePdfViewerStore', () => {
       defaultHighlightColor: 'yellow',
       highlightAnnotations: [{ id: otherId, color: 'yellow' }],
     });
+  });
+
+  it('stores underline and strikethrough annotations with the shared PDF color default', () => {
+    const highlightId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 1, top: 2, width: 30, height: 8 }],
+    });
+    const underlineId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'underline',
+      rects: [{ left: 1, top: 14, width: 30, height: 8 }],
+    });
+
+    usePdfViewerStore.getState().setHighlightAnnotationColor('docs/spec.pdf', underlineId!, 'cyan');
+    const strikethroughId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'strikethrough',
+      rects: [{ left: 1, top: 26, width: 30, height: 8 }],
+    });
+    const invalidKindId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'unknown' as never,
+      rects: [{ left: 1, top: 38, width: 30, height: 8 }],
+    });
+
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').highlightAnnotations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: highlightId, kind: 'highlight', color: 'yellow' }),
+      expect.objectContaining({ id: underlineId, kind: 'underline', color: 'cyan' }),
+      expect.objectContaining({ id: strikethroughId, kind: 'strikethrough', color: 'cyan' }),
+      expect.objectContaining({ id: invalidKindId, kind: 'highlight', color: 'cyan' }),
+    ]));
   });
 
   it('tracks highlight interaction and local comments, and cleans it when the highlight is removed', () => {

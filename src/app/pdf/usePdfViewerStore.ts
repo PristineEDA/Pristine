@@ -12,6 +12,7 @@ export type PdfViewerPageToneMode = 'auto' | 'original' | 'soft';
 export type PdfViewerRotation = 0 | 90 | 180 | 270;
 export type PdfViewerScrollMode = 'page' | 'vertical' | 'horizontal' | 'wrapped';
 export type PdfHighlightColor = 'yellow' | 'green' | 'cyan' | 'pink' | 'red';
+export type PdfHighlightKind = 'highlight' | 'underline' | 'strikethrough';
 
 export interface PdfHighlightRect {
   left: number;
@@ -24,6 +25,7 @@ export interface PdfHighlightAnnotation {
   id: string;
   pageNumber: number;
   rects: PdfHighlightRect[];
+  kind: PdfHighlightKind;
   color: PdfHighlightColor;
   comments: PdfHighlightComment[];
   quote: string;
@@ -40,6 +42,7 @@ export interface PdfHighlightComment {
 export interface CreatePdfHighlightAnnotationInput {
   pageNumber: number;
   rects: PdfHighlightRect[];
+  kind?: PdfHighlightKind;
   quote?: string;
 }
 
@@ -130,6 +133,10 @@ function normalizePageNumber(pageNumber: number, pageCount?: number): number {
 
 function normalizeZoom(zoom: number): number {
   return Math.round(clampNumber(zoom, PDF_VIEWER_MIN_ZOOM, PDF_VIEWER_MAX_ZOOM) * 100) / 100;
+}
+
+function normalizeHighlightKind(kind: PdfHighlightKind | undefined): PdfHighlightKind {
+  return kind === 'underline' || kind === 'strikethrough' ? kind : 'highlight';
 }
 
 function normalizeRotation(rotation: number): PdfViewerRotation {
@@ -708,6 +715,7 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
                 id,
                 pageNumber: normalizePageNumber(annotation.pageNumber),
                 rects,
+                kind: normalizeHighlightKind(annotation.kind),
                 color: current.defaultHighlightColor,
                 comments: [],
                 quote: (annotation.quote ?? '').slice(0, 512),
