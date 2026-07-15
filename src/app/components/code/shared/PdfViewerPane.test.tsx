@@ -747,6 +747,80 @@ describe('PdfViewerPane', () => {
     ]));
   });
 
+  it('shows hover outlines and a pointer cursor for every markup kind', async () => {
+    const pdfDocument = createMockPdfDocument(1, { 1: ['Selectable annotation text'] });
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });
+    const highlightId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 40, top: 50, width: 120, height: 16 }],
+    });
+    const underlineId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'underline',
+      rects: [{ left: 40, top: 80, width: 120, height: 16 }],
+    });
+    const strikethroughId = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      kind: 'strikethrough',
+      rects: [{ left: 40, top: 110, width: 120, height: 16 }],
+    });
+
+    render(<PdfViewerPane fileId="docs/spec.pdf" fileName="spec.pdf" />);
+
+    await screen.findByTestId('pdf-viewer-text-layer-1');
+    const pageContent = screen.getByTestId('pdf-viewer-page-1')
+      .querySelector<HTMLElement>('[data-pdf-page-content="true"]');
+    expect(pageContent).not.toBeNull();
+    vi.spyOn(pageContent!, 'getBoundingClientRect').mockReturnValue(createRect(10, 20, 600, 800));
+    mockPdfSelection({ isCollapsed: true, rects: [] });
+    const viewport = screen.getByTestId('pdf-viewer-scroll-viewport');
+    const textRun = screen.getByTestId('pdf-viewer-text-layer-1').querySelector('span');
+    expect(textRun).not.toBeNull();
+    expect(textRun).toHaveClass('cursor-text');
+
+    fireEvent.pointerMove(viewport, { clientX: 70, clientY: 75 });
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').hoveredHighlightId,
+    ).toBe(highlightId));
+    expect(viewport).toHaveClass('cursor-pointer');
+    expect(textRun).toHaveClass('cursor-pointer');
+    expect(screen.getByTestId('pdf-viewer-highlight')).toHaveAttribute('data-pdf-highlight-hovered', 'true');
+    expect(screen.getByTestId('pdf-viewer-highlight')).toHaveStyle({ boxShadow: '0 0 0 2px rgba(14, 165, 233, 0.95)' });
+
+    fireEvent.pointerMove(viewport, { clientX: 70, clientY: 105 });
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').hoveredHighlightId,
+    ).toBe(underlineId));
+    expect(screen.getByTestId('pdf-viewer-underline')).toHaveAttribute('data-pdf-highlight-hovered', 'true');
+    expect(screen.getByTestId('pdf-viewer-highlight-selection-outline')).toHaveAttribute('data-pdf-highlight-outline', 'hovered');
+
+    usePdfViewerStore.getState().setSelectedHighlight('docs/spec.pdf', underlineId);
+    await waitFor(() => expect(
+      screen.getByTestId('pdf-viewer-highlight-selection-outline'),
+    ).toHaveAttribute('data-pdf-highlight-outline', 'selected'));
+    fireEvent.pointerMove(viewport, { clientX: 70, clientY: 105 });
+    expect(screen.getAllByTestId('pdf-viewer-highlight-selection-outline')).toHaveLength(1);
+    expect(screen.getByTestId('pdf-viewer-highlight-selection-outline')).toHaveAttribute('data-pdf-highlight-outline', 'selected');
+
+    fireEvent.pointerMove(viewport, { clientX: 70, clientY: 135 });
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').hoveredHighlightId,
+    ).toBe(strikethroughId));
+    expect(screen.getByTestId('pdf-viewer-strikethrough')).toHaveAttribute('data-pdf-highlight-hovered', 'true');
+
+    fireEvent.pointerLeave(viewport);
+    await waitFor(() => expect(
+      usePdfViewerStore.getState().getSession('docs/spec.pdf').hoveredHighlightId,
+    ).toBeNull());
+    expect(viewport).not.toHaveClass('cursor-pointer');
+    expect(textRun).toHaveClass('cursor-text');
+
+    usePdfViewerStore.getState().setToolMode('docs/spec.pdf', 'hand');
+    fireEvent.pointerMove(viewport, { clientX: 70, clientY: 75 });
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').hoveredHighlightId).toBeNull();
+    expect(textRun).toHaveClass('cursor-text');
+  });
+
   it('opens a comment overlay on highlight double-click and submits local comments', async () => {
     const pdfDocument = createMockPdfDocument(1, { 1: ['Commented annotation text'] });
     mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdfDocument) });

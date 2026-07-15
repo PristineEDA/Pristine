@@ -231,6 +231,7 @@ interface PdfPageTextLayerProps {
   shouldRender: boolean;
   pageSize: PdfPageSize;
   toolMode: PdfViewerToolMode;
+  isHighlightHovered: boolean;
   searchMatches: PdfSearchMatch[];
   activeSearchMatchIndex: number;
   onTextItemsChange: (pageNumber: number, items: PdfTextRun[]) => void;
@@ -252,6 +253,7 @@ interface PdfPageHighlightLayerProps {
   pageSize: PdfPageSize;
   zoom: number;
   annotations: PdfHighlightAnnotation[];
+  hoveredHighlightId: string | null;
   selectedHighlightId: string | null;
 }
 
@@ -919,6 +921,7 @@ function PdfPageTextLayer({
   shouldRender,
   pageSize,
   toolMode,
+  isHighlightHovered,
   searchMatches,
   activeSearchMatchIndex,
   onTextItemsChange,
@@ -977,6 +980,7 @@ function PdfPageTextLayer({
     <div
       data-testid={`pdf-viewer-text-layer-${pageNumber}`}
       data-pdf-text-layer="true"
+      data-pdf-highlight-hovered={isHighlightHovered ? 'true' : 'false'}
       className={[
         'absolute inset-0 z-[2] overflow-hidden',
         toolMode === 'hand' ? 'pointer-events-none select-none' : 'select-text',
@@ -1007,7 +1011,8 @@ function PdfPageTextLayer({
                 data-pdf-search-match-index={match?.globalIndex}
                 data-pdf-text-item-index={item.itemIndex}
                 className={[
-                  'absolute cursor-text whitespace-pre text-transparent selection:bg-sky-400/35',
+                  'absolute whitespace-pre text-transparent selection:bg-sky-400/35',
+                  toolMode === 'select' && isHighlightHovered ? 'cursor-pointer' : 'cursor-text',
                   match ? 'rounded-sm bg-amber-300/35' : '',
                   isActiveMatch ? 'outline outline-1 outline-amber-200 bg-amber-300/60' : '',
                 ].join(' ')}
@@ -1048,6 +1053,7 @@ function PdfPageHighlightLayer({
   pageSize,
   zoom,
   annotations,
+  hoveredHighlightId,
   selectedHighlightId,
 }: PdfPageHighlightLayerProps) {
   const pageAnnotations = annotations.filter((annotation) => annotation.pageNumber === pageNumber);
@@ -1063,7 +1069,9 @@ function PdfPageHighlightLayer({
     >
       {pageAnnotations.flatMap((annotation) => annotation.rects.map((rect, rectIndex) => {
         const colorOption = PDF_HIGHLIGHT_COLOR_OPTIONS.find((option) => option.value === annotation.color);
+        const isHovered = hoveredHighlightId === annotation.id;
         const isSelected = selectedHighlightId === annotation.id;
+        const shouldShowOutline = isHovered || isSelected;
         const left = rect.left * zoom;
         const top = rect.top * zoom;
         const width = rect.width * zoom;
@@ -1077,6 +1085,7 @@ function PdfPageHighlightLayer({
           'data-pdf-highlight-id': annotation.id,
           'data-pdf-highlight-kind': annotation.kind,
           'data-pdf-highlight-color': annotation.color,
+          'data-pdf-highlight-hovered': isHovered ? 'true' : 'false',
           title: annotation.quote,
         };
 
@@ -1088,7 +1097,7 @@ function PdfPageHighlightLayer({
               className="absolute rounded-[1px] mix-blend-multiply"
               style={{
                 backgroundColor: colorOption?.background,
-                boxShadow: isSelected
+                boxShadow: shouldShowOutline
                   ? '0 0 0 2px rgba(14, 165, 233, 0.95)'
                   : 'inset 0 0 0 1px rgba(255, 255, 255, 0.08)',
                 left,
@@ -1116,10 +1125,12 @@ function PdfPageHighlightLayer({
                 height: lineThickness,
               }}
             />
-            {isSelected ? (
+            {shouldShowOutline ? (
               <div
                 aria-hidden="true"
                 data-testid="pdf-viewer-highlight-selection-outline"
+                data-pdf-highlight-id={annotation.id}
+                data-pdf-highlight-outline={isSelected ? 'selected' : 'hovered'}
                 className="pointer-events-none absolute rounded-[1px]"
                 style={{
                   boxShadow: '0 0 0 2px rgba(14, 165, 233, 0.95)',
@@ -1983,6 +1994,7 @@ export function PdfViewerPane({
     fitMode,
     expandedBookmarkIds,
     highlightAnnotations,
+    hoveredHighlightId,
     isBookmarkTreeVisible,
     isInfoPanelOpen,
     isPresentationModeActive,
@@ -2010,6 +2022,7 @@ export function PdfViewerPane({
   const removeHighlightAnnotation = usePdfViewerStore((state) => state.removeHighlightAnnotation);
   const setCommentHighlight = usePdfViewerStore((state) => state.setCommentHighlight);
   const setHighlightAnnotationColor = usePdfViewerStore((state) => state.setHighlightAnnotationColor);
+  const setHoveredHighlight = usePdfViewerStore((state) => state.setHoveredHighlight);
   const setSelectedHighlight = usePdfViewerStore((state) => state.setSelectedHighlight);
   const setPageNumber = usePdfViewerStore((state) => state.setPageNumber);
   const setPageNumberFromViewport = usePdfViewerStore((state) => state.setPageNumberFromViewport);
@@ -2025,6 +2038,10 @@ export function PdfViewerPane({
   const canGoPrevious = pageNumber > 1;
   const canGoNext = pageCount > 0 && pageNumber < pageCount;
   const canGoFirst = canGoPrevious;
+  const hoveredHighlightPageNumber = useMemo(
+    () => highlightAnnotations.find((annotation) => annotation.id === hoveredHighlightId)?.pageNumber ?? null,
+    [highlightAnnotations, hoveredHighlightId],
+  );
   const canGoLast = canGoNext;
   const pageNumbers = useMemo(
     () => Array.from({ length: pageCount }, (_, index) => index + 1),
@@ -2600,6 +2617,7 @@ export function PdfViewerPane({
   const handleViewportScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const viewport = event.currentTarget;
     hideSelectionToolbar();
+    setHoveredHighlight(fileId, null);
     if (isPresentationModeActive) {
       return;
     }
@@ -2621,6 +2639,7 @@ export function PdfViewerPane({
     pageNumber,
     pageSizes,
     scrollMode,
+    setHoveredHighlight,
     setPageNumberFromViewport,
     setScrollPosition,
     zoom,
@@ -2856,6 +2875,8 @@ export function PdfViewerPane({
       return;
     }
 
+    setHoveredHighlight(fileId, null);
+
     let nextScrollLeft: number | null = null;
     let nextScrollTop: number | null = null;
 
@@ -2879,7 +2900,7 @@ export function PdfViewerPane({
         });
       });
     }
-  }, [fileId, fitMode, setScrollPosition, setZoom, zoom]);
+  }, [fileId, fitMode, setHoveredHighlight, setScrollPosition, setZoom, zoom]);
 
   const applyFitMode = useCallback((nextFitMode: Exclude<PdfViewerFitMode, 'custom'>) => {
     const viewport = viewportRef.current;
@@ -3072,6 +3093,7 @@ export function PdfViewerPane({
   ]);
 
   const handleViewportMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    setHoveredHighlight(fileId, null);
     if (isPresentationModeActive) {
       hideSelectionToolbar();
       return;
@@ -3080,7 +3102,7 @@ export function PdfViewerPane({
     const target = event.target instanceof Element ? event.target : null;
     isTextSelectingRef.current = toolMode === 'select' && Boolean(target?.closest('[data-pdf-text-layer="true"]'));
     hideSelectionToolbar();
-  }, [hideSelectionToolbar, isPresentationModeActive, toolMode]);
+  }, [fileId, hideSelectionToolbar, isPresentationModeActive, setHoveredHighlight, toolMode]);
 
   const handleViewportMouseUp = useCallback(() => {
     if (isPresentationModeActive) {
@@ -3115,22 +3137,45 @@ export function PdfViewerPane({
 
   const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const dragState = handDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
+    if (dragState?.pointerId === event.pointerId) {
+      event.preventDefault();
+      const viewport = event.currentTarget;
+      setViewportScroll(
+        viewport,
+        dragState.scrollLeft - (event.clientX - dragState.startX),
+        dragState.scrollTop - (event.clientY - dragState.startY),
+      );
+      setScrollPosition(fileId, {
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+      });
       return;
     }
 
-    event.preventDefault();
-    const viewport = event.currentTarget;
-    setViewportScroll(
-      viewport,
-      dragState.scrollLeft - (event.clientX - dragState.startX),
-      dragState.scrollTop - (event.clientY - dragState.startY),
+    if (isPresentationModeActive || toolMode !== 'select' || isTextSelectingRef.current) {
+      setHoveredHighlight(fileId, null);
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-pdf-link="true"], button, input, textarea, [role="button"]')) {
+      setHoveredHighlight(fileId, null);
+      return;
+    }
+
+    const annotation = getHighlightAtViewportPoint(
+      event.currentTarget,
+      highlightAnnotations,
+      zoom,
+      event.clientX,
+      event.clientY,
     );
-    setScrollPosition(fileId, {
-      scrollLeft: viewport.scrollLeft,
-      scrollTop: viewport.scrollTop,
-    });
-  }, [fileId, setScrollPosition]);
+    setHoveredHighlight(fileId, annotation?.id ?? null);
+  }, [fileId, highlightAnnotations, isPresentationModeActive, setHoveredHighlight, setScrollPosition, toolMode, zoom]);
+
+  const handleViewportPointerLeave = useCallback(() => {
+    setHoveredHighlight(fileId, null);
+  }, [fileId, setHoveredHighlight]);
 
   const handlePointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (handDragRef.current?.pointerId === event.pointerId) {
@@ -3346,12 +3391,14 @@ export function PdfViewerPane({
   useEffect(() => {
     if (toolMode === 'hand' || isPresentationModeActive) {
       closeHighlightInteraction(fileId);
+      setHoveredHighlight(fileId, null);
     }
-  }, [closeHighlightInteraction, fileId, isPresentationModeActive, toolMode]);
+  }, [closeHighlightInteraction, fileId, isPresentationModeActive, setHoveredHighlight, toolMode]);
 
   useEffect(() => () => {
     closeHighlightInteraction(fileId);
-  }, [closeHighlightInteraction, fileId]);
+    setHoveredHighlight(fileId, null);
+  }, [closeHighlightInteraction, fileId, setHoveredHighlight]);
 
   const handleFirstPage = () => scrollToPage(1);
   const handlePreviousPage = () => scrollToPage(pageNumber - 1);
@@ -3359,6 +3406,7 @@ export function PdfViewerPane({
   const handleLastPage = () => scrollToPage(pageCount);
   const handleRotate = (delta: number) => {
     hideSelectionToolbar();
+    setHoveredHighlight(fileId, null);
     rotate(fileId, delta);
     window.requestAnimationFrame(() => scrollToPage(pageNumber));
   };
@@ -3370,6 +3418,7 @@ export function PdfViewerPane({
     }
 
     hideSelectionToolbar();
+    setHoveredHighlight(fileId, null);
     resetPageScrollWheelState();
     scrollModeRestorePageRef.current = pageNumber;
     setScrollMode(fileId, nextScrollMode);
@@ -3968,12 +4017,14 @@ export function PdfViewerPane({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onPointerLeave={handleViewportPointerLeave}
             onScroll={handleViewportScroll}
             onWheel={handleWheel}
             className={[
               'min-h-0 flex-1 overflow-auto focus:outline-none',
               isPresentationModeActive ? 'bg-black' : 'bg-ide-editor-bg',
               !isPresentationModeActive && toolMode === 'hand' ? (isHandDragging ? 'cursor-grabbing' : 'cursor-grab') : '',
+              !isPresentationModeActive && toolMode === 'select' && hoveredHighlightId ? 'cursor-pointer' : '',
             ].join(' ')}
           >
             <div
@@ -4046,6 +4097,7 @@ export function PdfViewerPane({
                           pageSize={pageSize}
                           zoom={zoom}
                           annotations={highlightAnnotations}
+                          hoveredHighlightId={hoveredHighlightId}
                           selectedHighlightId={selectedHighlightId}
                         />
                         <PdfPageTextLayer
@@ -4056,6 +4108,7 @@ export function PdfViewerPane({
                           shouldRender={shouldRender}
                           pageSize={pageSize}
                           toolMode={effectiveToolMode}
+                          isHighlightHovered={hoveredHighlightPageNumber === currentPageNumber}
                           searchMatches={searchMatches.filter((match) => match.pageNumber === currentPageNumber)}
                           activeSearchMatchIndex={activeSearchMatchIndex}
                           onTextItemsChange={handleTextItemsChange}

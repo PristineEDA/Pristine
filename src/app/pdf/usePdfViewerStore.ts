@@ -75,6 +75,7 @@ export interface PdfViewerSession {
   isThumbnailRailVisible: boolean;
   expandedBookmarkIds: string[];
   defaultHighlightColor: PdfHighlightColor;
+  hoveredHighlightId: string | null;
   selectedHighlightId: string | null;
   commentHighlightId: string | null;
   highlightAnnotations: PdfHighlightAnnotation[];
@@ -107,6 +108,7 @@ interface PdfViewerStoreState {
   setThumbnailRailVisible: (fileId: string, visible: boolean) => void;
   toggleBookmarkExpanded: (fileId: string, bookmarkId: string) => void;
   addHighlightAnnotation: (fileId: string, annotation: CreatePdfHighlightAnnotationInput) => string | null;
+  setHoveredHighlight: (fileId: string, annotationId: string | null) => void;
   setSelectedHighlight: (fileId: string, annotationId: string | null) => void;
   setCommentHighlight: (fileId: string, annotationId: string | null) => void;
   closeHighlightInteraction: (fileId: string) => void;
@@ -239,6 +241,7 @@ const DEFAULT_PDF_VIEWER_SESSION: PdfViewerSession = {
   isThumbnailRailVisible: true,
   expandedBookmarkIds: [],
   defaultHighlightColor: 'yellow',
+  hoveredHighlightId: null,
   selectedHighlightId: null,
   commentHighlightId: null,
   highlightAnnotations: [],
@@ -729,6 +732,32 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
 
     return id;
   },
+  setHoveredHighlight: (fileId, annotationId) => {
+    if (!fileId) {
+      return;
+    }
+
+    set((state) => {
+      const current = state.sessions[fileId] ?? DEFAULT_PDF_VIEWER_SESSION;
+      const hoveredHighlightId = annotationId
+        && current.highlightAnnotations.some((annotation) => annotation.id === annotationId)
+        ? annotationId
+        : null;
+      if (current.hoveredHighlightId === hoveredHighlightId) {
+        return state;
+      }
+
+      return {
+        sessions: {
+          ...state.sessions,
+          [fileId]: {
+            ...current,
+            hoveredHighlightId,
+          },
+        },
+      };
+    });
+  },
   setSelectedHighlight: (fileId, annotationId) => {
     if (!fileId) {
       return;
@@ -886,6 +915,7 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           ...state.sessions,
           [fileId]: {
             ...current,
+            hoveredHighlightId: current.hoveredHighlightId === annotationId ? null : current.hoveredHighlightId,
             selectedHighlightId: current.selectedHighlightId === annotationId ? null : current.selectedHighlightId,
             commentHighlightId: current.commentHighlightId === annotationId ? null : current.commentHighlightId,
             highlightAnnotations: nextAnnotations,
@@ -910,6 +940,7 @@ export const usePdfViewerStore = create<PdfViewerStoreState>((set, get) => ({
           ...state.sessions,
           [fileId]: {
             ...current,
+            hoveredHighlightId: null,
             selectedHighlightId: null,
             commentHighlightId: null,
             highlightAnnotations: [],

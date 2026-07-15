@@ -27,6 +27,7 @@ const defaultSession = {
   isThumbnailRailVisible: true,
   expandedBookmarkIds: [],
   defaultHighlightColor: 'yellow',
+  hoveredHighlightId: null,
   selectedHighlightId: null,
   commentHighlightId: null,
   highlightAnnotations: [],
@@ -347,6 +348,24 @@ describe('usePdfViewerStore', () => {
       expect.objectContaining({ id: strikethroughId, kind: 'strikethrough', color: 'cyan' }),
       expect.objectContaining({ id: invalidKindId, kind: 'highlight', color: 'cyan' }),
     ]));
+  });
+
+  it('tracks hovered annotations per PDF and clears hover with deleted markup', () => {
+    const id = usePdfViewerStore.getState().addHighlightAnnotation('docs/spec.pdf', {
+      pageNumber: 1,
+      rects: [{ left: 1, top: 2, width: 30, height: 8 }],
+    });
+
+    usePdfViewerStore.getState().setHoveredHighlight('docs/spec.pdf', id);
+    const sessionAfterHover = usePdfViewerStore.getState().getSession('docs/spec.pdf');
+    expect(sessionAfterHover.hoveredHighlightId).toBe(id);
+
+    usePdfViewerStore.getState().setHoveredHighlight('docs/spec.pdf', id);
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf')).toBe(sessionAfterHover);
+    expect(usePdfViewerStore.getState().getSession('docs/other.pdf').hoveredHighlightId).toBeNull();
+
+    usePdfViewerStore.getState().removeHighlightAnnotation('docs/spec.pdf', id!);
+    expect(usePdfViewerStore.getState().getSession('docs/spec.pdf').hoveredHighlightId).toBeNull();
   });
 
   it('tracks highlight interaction and local comments, and cleans it when the highlight is removed', () => {

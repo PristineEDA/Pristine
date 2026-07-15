@@ -5440,15 +5440,60 @@ test('PDF highlight supports colors, deletion, and local comments', async () => 
   const createHighlightFromTextRun = (runIndex: number) => (
     createAnnotationFromTextRun(runIndex, 'pdf-viewer-selection-highlight')
   );
+  const hoverAnnotation = async (annotation: Locator) => {
+    const bounds = await annotation.boundingBox();
+    if (!bounds) {
+      throw new Error('Expected PDF annotation bounds for hover.');
+    }
+    await window.mouse.move(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+    );
+    await expect(viewport).toHaveCSS('cursor', 'pointer');
+    await expect(annotation).toHaveAttribute('data-pdf-highlight-hovered', 'true');
+    return bounds;
+  };
+  const hoverAnnotationText = async (runIndex: number, annotation: Locator) => {
+    const textRun = window.getByTestId('pdf-viewer-text-layer-1').locator('span').nth(runIndex);
+    const bounds = await textRun.boundingBox();
+    if (!bounds) {
+      throw new Error(`Expected PDF text run ${runIndex} for annotation hover.`);
+    }
+    await window.mouse.move(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+    );
+    await expect(textRun).toHaveCSS('cursor', 'pointer');
+    await expect(viewport).toHaveCSS('cursor', 'pointer');
+    await expect(annotation).toHaveAttribute('data-pdf-highlight-hovered', 'true');
+  };
+  const clearAnnotationHover = async (annotation: Locator) => {
+    const toolbarBounds = await window.getByTestId('pdf-viewer-toolbar').boundingBox();
+    if (!toolbarBounds) {
+      throw new Error('Expected PDF toolbar bounds for hover cleanup.');
+    }
+    await window.mouse.move(toolbarBounds.x + 4, toolbarBounds.y + 4);
+    await expect(viewport).not.toHaveCSS('cursor', 'pointer');
+    await expect(annotation).toHaveAttribute('data-pdf-highlight-hovered', 'false');
+  };
+  const expectAnnotationHoverOutline = async (annotation: Locator) => {
+    const annotationId = await annotation.getAttribute('data-pdf-highlight-id');
+    if (!annotationId) {
+      throw new Error('Expected PDF annotation id for hover outline.');
+    }
+    await expect(window.locator(
+      `[data-testid="pdf-viewer-highlight-selection-outline"][data-pdf-highlight-id="${annotationId}"]`,
+    )).toHaveAttribute('data-pdf-highlight-outline', 'hovered');
+  };
 
   await createHighlightFromTextRun(0);
   await expect(window.getByTestId('pdf-viewer-highlight')).toHaveCount(1);
   const firstHighlight = window.getByTestId('pdf-viewer-highlight').first();
   await expect(firstHighlight).toHaveAttribute('data-pdf-highlight-color', 'yellow');
-  const firstHighlightBox = await firstHighlight.boundingBox();
-  if (!firstHighlightBox) {
-    throw new Error('Expected first PDF highlight bounds.');
-  }
+  const firstHighlightBox = await hoverAnnotation(firstHighlight);
+  await expect(firstHighlight).toHaveCSS('box-shadow', /rgba?\(14, 165, 233/);
+  await hoverAnnotationText(0, firstHighlight);
+  await clearAnnotationHover(firstHighlight);
   await window.mouse.click(
     firstHighlightBox.x + firstHighlightBox.width / 2,
     firstHighlightBox.y + firstHighlightBox.height / 2,
@@ -5471,10 +5516,18 @@ test('PDF highlight supports colors, deletion, and local comments', async () => 
   const underline = window.getByTestId('pdf-viewer-underline').first();
   await expect(underline).toHaveAttribute('data-pdf-highlight-kind', 'underline');
   await expect(underline).toHaveAttribute('data-pdf-highlight-color', 'green');
-  const underlineBox = await underline.boundingBox();
-  if (!underlineBox) {
-    throw new Error('Expected PDF underline bounds.');
-  }
+  const underlineBox = await hoverAnnotation(underline);
+  await expectAnnotationHoverOutline(underline);
+  await hoverAnnotationText(2, underline);
+  await clearAnnotationHover(underline);
+  await window.getByTestId('pdf-viewer-hand-tool').click();
+  await window.mouse.move(
+    underlineBox.x + underlineBox.width / 2,
+    underlineBox.y + underlineBox.height / 2,
+  );
+  await expect(viewport).not.toHaveCSS('cursor', 'pointer');
+  await expect(underline).toHaveAttribute('data-pdf-highlight-hovered', 'false');
+  await window.getByTestId('pdf-viewer-select-tool').click();
   await window.mouse.click(
     underlineBox.x + underlineBox.width / 2,
     underlineBox.y + underlineBox.height / 2,
@@ -5498,10 +5551,10 @@ test('PDF highlight supports colors, deletion, and local comments', async () => 
   const strikethrough = window.getByTestId('pdf-viewer-strikethrough').first();
   await expect(strikethrough).toHaveAttribute('data-pdf-highlight-kind', 'strikethrough');
   await expect(strikethrough).toHaveAttribute('data-pdf-highlight-color', 'green');
-  const strikethroughBox = await strikethrough.boundingBox();
-  if (!strikethroughBox) {
-    throw new Error('Expected PDF strikethrough bounds.');
-  }
+  const strikethroughBox = await hoverAnnotation(strikethrough);
+  await expectAnnotationHoverOutline(strikethrough);
+  await hoverAnnotationText(3, strikethrough);
+  await clearAnnotationHover(strikethrough);
   await window.mouse.click(
     strikethroughBox.x + strikethroughBox.width / 2,
     strikethroughBox.y + strikethroughBox.height / 2,
